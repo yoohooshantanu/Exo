@@ -1,0 +1,170 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: oklch(1.0000 0 0);
+    --foreground: oklch(0.2138 0.0019 286.2347);
+    --card: oklch(1.0000 0 0);
+    --card-foreground: oklch(0.2138 0.0019 286.2347);
+    --popover: oklch(1.0000 0 0);
+    --popover-foreground: oklch(0.2138 0.0019 286.2347);
+    --primary: oklch(0.2138 0.0019 286.2347);
+    --primary-foreground: oklch(0.9851 0 0);
+    --secondary: oklch(0.9702 0 0);
+    --secondary-foreground: oklch(0.2138 0.0019 286.2347);
+    --muted: oklch(0.9702 0 0);
+    --muted-foreground: oklch(0.5555 0 0);
+    --accent: oklch(0.9702 0 0);
+    --accent-foreground: oklch(0.2138 0.0019 286.2347);
+    --destructive: oklch(0.5406 0.2164 30.0696);
+    --destructive-foreground: oklch(1.0000 0 0);
+    --border: oklch(0.9219 0 0);
+    --input: oklch(0.9219 0 0);
+    --ring: oklch(0.7090 0 0);
+    --chart-1: oklch(0.7620 0.1210 268.8807);
+    --chart-2: oklch(0.5429 0.2366 268.4747);
+    --chart-3: oklch(0.4787 0.2656 267.5960);
+    --chart-4: oklch(0.4303 0.2586 266.8914);
+    --chart-5: oklch(0.3727 0.2109 269.7479);
+    --radius: 0.5rem;
+    --sidebar: oklch(0.9851 0 0);
+    --sidebar-foreground: oklch(0.2138 0.0019 286.2347);
+    --sidebar-primary: oklch(0.2138 0.0019 286.2347);
+    --sidebar-primary-foreground: oklch(0.9851 0 0);
+    --sidebar-accent: oklch(0.9702 0 0);
+    --sidebar-accent-foreground: oklch(0.2138 0.0019 286.2347);
+    --sidebar-border: oklch(0.9219 0 0);
+    --sidebar-ring: oklch(0.7090 0 0);
+  }
+
+  .dark {
+    --background: oklch(0 0 0);
+    --foreground: oklch(1.0000 0 0);
+    --card: oklch(0 0 0);
+    --card-foreground: oklch(1.0000 0 0);
+    --popover: oklch(0 0 0);
+    --popover-foreground: oklch(1.0000 0 0);
+    --primary: oklch(1.0000 0 0);
+    --primary-foreground: oklch(0 0 0);
+    --secondary: oklch(0.1776 0 0);
+    --secondary-foreground: oklch(1.0000 0 0);
+    --muted: oklch(0.1776 0 0);
+    --muted-foreground: oklch(0.7090 0 0);
+    --accent: oklch(0.1776 0 0);
+    --accent-foreground: oklch(1.0000 0 0);
+    --destructive: oklch(0.6491 0.2386 33.1474);
+    --destructive-foreground: oklch(1.0000 0 0);
+    --border: oklch(0.1776 0 0);
+    --input: oklch(0.1776 0 0);
+    --ring: oklch(0.1776 0 0);
+    --chart-1: oklch(0.7620 0.1210 268.8807);
+    --chart-2: oklch(0.5429 0.2366 268.4747);
+    --chart-3: oklch(0.4787 0.2656 267.5960);
+    --chart-4: oklch(0.4303 0.2586 266.8914);
+    --chart-5: oklch(0.3727 0.2109 269.7479);
+    --sidebar: oklch(0.1776 0 0);
+    --sidebar-foreground: oklch(1.0000 0 0);
+    --sidebar-primary: oklch(0.4333 0.2791 265.9524);
+    --sidebar-primary-foreground: oklch(1.0000 0 0);
+    --sidebar-accent: oklch(0.1776 0 0);
+    --sidebar-accent-foreground: oklch(1.0000 0 0);
+    --sidebar-border: oklch(0.1776 0 0);
+    --sidebar-ring: oklch(0.1776 0 0);
+  }
+
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    font-family: 'Space Grotesk', ui-sans-serif, sans-serif, system-ui;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* ── Custom animations ───────────────────────────────────────────── */
+@keyframes orbit-trace {
+  from { stroke-dashoffset: 1000; }
+  to   { stroke-dashoffset: 0; }
+}
+@keyframes draw-line {
+  from { stroke-dashoffset: var(--path-length, 200); }
+  to   { stroke-dashoffset: 0; }
+}
+
+.animate-orbit-trace {
+  stroke-dasharray: 1000;
+  animation: orbit-trace 2s ease-out forwards;
+}
+.animate-draw-line {
+  stroke-dasharray: var(--path-length, 200);
+  animation: draw-line 1.2s ease-out forwards;
+}
+
+/* Stagger delays */
+.delay-1 { animation-delay: 30ms; }
+.delay-2 { animation-delay: 60ms; }
+.delay-3 { animation-delay: 90ms; }
+.delay-4 { animation-delay: 120ms; }
+.delay-5 { animation-delay: 150ms; }
+.delay-6 { animation-delay: 180ms; }
+.delay-7 { animation-delay: 210ms; }
+.delay-8 { animation-delay: 240ms; }
+
+/* Monospace data utility */
+.font-data {
+  font-family: 'Space Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: oklch(0.1776 0 0); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: oklch(0.3 0 0); }
+
+/* ── ExoDiscovery Deep Space Design Tokens ─────────────────────── */
+:root {
+  /* Surfaces — cold dark, slight blue shift */
+  --exo-void:       #05050a;
+  --exo-base:       #090912;
+  --exo-raised:     #0f0f1a;
+  --exo-overlay:    #16162a;
+
+  /* Borders */
+  --exo-border-sub: #141420;
+  --exo-border:     #1e1e30;
+  --exo-border-hi:  #2e2e50;
+
+  /* Text */
+  --exo-text-1:     #dde1f0;
+  --exo-text-2:     #5c6070;
+  --exo-text-3:     #2e3040;
+  --exo-text-white: #f0f2ff;
+
+  /* Accent — ONE color */
+  --exo-accent:     #4f7fff;
+  --exo-accent-glow: rgba(79,127,255,0.12);
+  --exo-accent-dim: #0e1a33;
+
+  /* Semantic */
+  --exo-green:      #2e8b5a;
+  --exo-green-dim:  #091a10;
+  --exo-amber:      #c47a2a;
+  --exo-amber-dim:  #1f1205;
+  --exo-red:        #8b2e2e;
+  --exo-red-dim:    #1a0909;
+
+  /* Typography */
+  --exo-font-mono:  'DM Mono', 'JetBrains Mono', monospace;
+  --exo-font-serif: 'Instrument Serif', Georgia, serif;
+  --exo-font-system: -apple-system, BlinkMacSystemFont, sans-serif;
+}
