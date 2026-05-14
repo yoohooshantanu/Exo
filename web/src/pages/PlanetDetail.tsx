@@ -124,7 +124,8 @@ export default function PlanetDetail() {
       mass_min: g.mass_min_earth,
       mass_max: g.mass_max_earth,
       confidence: g.stability_confidence,
-      hint: g.detection_method_hint
+      hint: g.detection_method_hint,
+      isTarget: false
     }))
   ].sort((a, b) => a.period - b.period)
 

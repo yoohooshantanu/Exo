@@ -21,6 +21,8 @@ export interface ProfileHabitability {
   teq_score?: number
   radius_esi_score?: number
   mass_esi_score?: number
+  eccentricity_score?: number
+  age_score?: number
 }
 
 export interface ProfileBiosignatures {
@@ -98,6 +100,7 @@ export interface OrbitalGapItem {
   mass_min_earth?: number
   mass_max_earth?: number
   detection_method_hint?: string
+  isTarget?: boolean
 }
 
 export interface StarItem {
@@ -165,6 +168,7 @@ export interface MoleculeDetectionItem {
   abiotic_ruled_out?: boolean
   instrument?: string
   facility?: string
+  method_notes?: string
 }
 
 export interface SpectrumView {
