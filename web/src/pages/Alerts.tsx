@@ -3,10 +3,12 @@ import { useAlerts } from '@/hooks/useApi'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from '@/components/ui/table'
 import { AlertTriangle } from 'lucide-react'
+import { formatAlertReason } from '@/lib/utils'
 
 function ts(dateStr?: string): string {
   if (!dateStr) return '—'
@@ -41,10 +43,20 @@ export default function Alerts() {
             <TableHeader>
               <TableRow>
                 <TableHead className="text-xs">Timestamp</TableHead>
-                <TableHead className="text-xs">Severity</TableHead>
+                <TableHead className="text-xs">
+                  <Tooltip>
+                    <TooltipTrigger asChild><span className="cursor-help border-b border-dotted border-muted-foreground/50">Severity</span></TooltipTrigger>
+                    <TooltipContent><p>Priority level of the alert</p></TooltipContent>
+                  </Tooltip>
+                </TableHead>
                 <TableHead className="text-xs">Type</TableHead>
                 <TableHead className="text-xs">Planet</TableHead>
-                <TableHead className="text-xs text-right">Score</TableHead>
+                <TableHead className="text-xs text-right">
+                  <Tooltip>
+                    <TooltipTrigger asChild><span className="cursor-help border-b border-dotted border-muted-foreground/50">Score</span></TooltipTrigger>
+                    <TooltipContent><p>Latest habitability score</p></TooltipContent>
+                  </Tooltip>
+                </TableHead>
                 <TableHead className="text-xs w-8"></TableHead>
               </TableRow>
             </TableHeader>
@@ -84,7 +96,14 @@ export default function Alerts() {
                       {alert.score?.toFixed(3) ?? '—'}
                     </TableCell>
                     <TableCell>
-                      {isCritical && <AlertTriangle className="w-3.5 h-3.5 text-destructive" />}
+                      {isCritical && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <AlertTriangle className="w-3.5 h-3.5 text-destructive cursor-help outline-none" />
+                          </TooltipTrigger>
+                          <TooltipContent side="left"><p>{formatAlertReason(alert.alert_type, alert.detail)}</p></TooltipContent>
+                        </Tooltip>
+                      )}
                     </TableCell>
                   </TableRow>
                 )

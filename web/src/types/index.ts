@@ -11,9 +11,39 @@ export interface PlanetListItem {
   composite_score?: number
   hz_score?: number
   cluster_name?: string
+  discovery_score?: number
 }
 
-export interface PlanetDetail {
+export interface ProfileHabitability {
+  composite_score?: number
+  similarity_score?: number
+  hz_score?: number
+  teq_score?: number
+  radius_esi_score?: number
+  mass_esi_score?: number
+}
+
+export interface ProfileBiosignatures {
+  biosig_count: number
+  molecules: string[]
+  max_sigma?: number
+}
+
+export interface ProfileConfidence {
+  has_spectra: boolean
+  data_completeness: number
+  instrument_best?: string
+}
+
+export interface ProfileAnomalyRisk {
+  anomaly_count: number
+  anomaly_types: string[]
+  risk_score?: number
+  flare_score?: number
+  tidal_lock_score?: number
+}
+
+export interface PlanetProfileVector {
   planet_name: string
   planet_id: string
   hostname?: string
@@ -28,25 +58,46 @@ export interface PlanetDetail {
   semi_major_axis_au?: number
   eccentricity?: number
   density_earth?: number
-  composite_score?: number
-  hz_score?: number
-  teq_score?: number
-  radius_esi_score?: number
-  mass_esi_score?: number
-  tidal_lock_score?: number
-  flare_score?: number
-  eccentricity_score?: number
-  age_score?: number
-  similarity_score?: number
-  risk_score?: number
   cluster_label?: number
   cluster_name?: string
   distance_to_centroid?: number
-  anomaly_count: number
-  anomaly_types: string[]
-  biosig_count: number
-  molecules: string[]
-  gap_count: number
+  
+  discovery_score: number
+  score_breakdown: ScoreBreakdown
+  
+  habitability: ProfileHabitability
+  biosignatures: ProfileBiosignatures
+  confidence: ProfileConfidence
+  anomaly_risk: ProfileAnomalyRisk
+
+  system_planets: SystemPlanetItem[]
+  orbital_gaps: OrbitalGapItem[]
+}
+
+export interface ScoreBreakdown {
+  habitability: number
+  biosignature: number
+  data_quality: number
+  orbital_context: number
+  anomaly_penalty: number
+}
+
+export interface SystemPlanetItem {
+  planet_name: string
+  status: string
+  semi_major_axis_au?: number
+  period_days?: number
+  mass_earth?: number
+  radius_earth?: number
+}
+
+export interface OrbitalGapItem {
+  predicted_period_days: number
+  stability_confidence: number
+  model_version: string
+  mass_min_earth?: number
+  mass_max_earth?: number
+  detection_method_hint?: string
 }
 
 export interface StarItem {
@@ -81,7 +132,7 @@ export interface StarPositionsResponse {
 export interface PriorityTarget {
   planet_name: string
   hostname?: string
-  composite_score: number
+  discovery_score: number
   hz_score?: number
   cluster_name?: string
   radius_earth?: number
@@ -129,7 +180,7 @@ export interface SpectrumView {
 export interface RankingItem {
   planet_name: string
   hostname?: string
-  composite_score?: number
+  discovery_score?: number
   category: string
   detail?: string
 }

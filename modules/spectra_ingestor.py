@@ -265,15 +265,30 @@ def finish_ingestion_run(session, run_id, records, status="success", error=None)
 # -- upsert ------------------------------------------------------------------
 
 def upsert_spectra(db_session, rows, run_id):
-    count = 0
-    for row in rows:
-        existing = db_session.execute(text("""
-            SELECT row_id FROM atmospheric_spectra
-            WHERE spec_id=:sid AND ABS(wavelength_um - :wl) < 0.0001
-            LIMIT 1
-        """), {"sid": row["spec_id"], "wl": row["wavelength_um"]}).fetchone()
+    if not rows:
+        return 0
 
-        params = {
+    spec_ids = list(set(row["spec_id"] for row in rows))
+    log(f"  Deleting existing data for {len(spec_ids)} spectra...")
+    db_session.execute(
+        text("DELETE FROM atmospheric_spectra WHERE spec_id = ANY(:sids)"), 
+        {"sids": spec_ids}
+    )
+
+    log(f"  Bulk inserting {len(rows)} data points...")
+    insert_sql = text("""
+        INSERT INTO atmospheric_spectra
+            (row_id, spec_id, planet_id, planet_name, hostname,
+             obs_type, instrument, facility, pub_reference,
+             wavelength_um, bandwidth_um, depth_ppm,
+             depth_err_upper, depth_err_lower, run_id)
+        VALUES (:rid, :sid, :pid, :pn, :hn, :ot, :inst, :fac, :ref,
+                :wl, :bw, :dp, :eu, :el, :rn)
+    """)
+
+    params_list = []
+    for row in rows:
+        params_list.append({
             "rid": new_id(), "sid": row["spec_id"], "pid": row.get("planet_id"),
             "pn": row["planet_name"], "hn": row.get("hostname"),
             "ot": row.get("obs_type"), "inst": row.get("instrument"),
@@ -281,34 +296,16 @@ def upsert_spectra(db_session, rows, run_id):
             "wl": row["wavelength_um"], "bw": row.get("bandwidth_um"),
             "dp": row.get("depth_ppm"), "eu": row.get("depth_err_upper"),
             "el": row.get("depth_err_lower"), "rn": run_id,
-        }
+        })
 
-        if existing:
-            params["eid"] = existing[0]
-            db_session.execute(text("""
-                UPDATE atmospheric_spectra SET
-                    depth_ppm=:dp, depth_err_upper=:eu, depth_err_lower=:el,
-                    bandwidth_um=:bw, run_id=:rn
-                WHERE row_id=:eid
-            """), params)
-        else:
-            db_session.execute(text("""
-                INSERT INTO atmospheric_spectra
-                    (row_id, spec_id, planet_id, planet_name, hostname,
-                     obs_type, instrument, facility, pub_reference,
-                     wavelength_um, bandwidth_um, depth_ppm,
-                     depth_err_upper, depth_err_lower, run_id)
-                VALUES (:rid, :sid, :pid, :pn, :hn, :ot, :inst, :fac, :ref,
-                        :wl, :bw, :dp, :eu, :el, :rn)
-            """), params)
-
-        count += 1
-        if count % 100 == 0:
-            db_session.commit()
-            log(f"  {count} rows processed ...")
+    chunk_size = 10000
+    for i in range(0, len(params_list), chunk_size):
+        chunk = params_list[i:i+chunk_size]
+        db_session.execute(insert_sql, chunk)
+        log(f"  Inserted {i + len(chunk)} / {len(params_list)} rows ...")
 
     db_session.commit()
-    return count
+    return len(rows)
 
 
 # -- main --------------------------------------------------------------------

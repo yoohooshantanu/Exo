@@ -50,7 +50,7 @@ export default function Rankings() {
               <TableHead>Planet</TableHead>
               <TableHead>Host Star</TableHead>
               <TableHead>Classification</TableHead>
-              <TableHead className="text-right">Score</TableHead>
+              <TableHead className="text-right">D-Score</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -89,7 +89,7 @@ export default function Rankings() {
                   ) : '—'}
                 </TableCell>
                 <TableCell className="text-right font-data text-chart-1">
-                  {item.composite_score != null ? item.composite_score.toFixed(3) : '—'}
+                  {item.discovery_score != null ? item.discovery_score.toFixed(1) : '—'}
                 </TableCell>
               </TableRow>
             ))}

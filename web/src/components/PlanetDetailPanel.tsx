@@ -24,12 +24,12 @@ export default function PlanetDetailPanel({ name }: { name: string }) {
   const esiData = useMemo(() => {
     if (!planet) return []
     return [
-      { axis: 'Radius', value: planet.radius_esi_score ?? 0 },
-      { axis: 'Mass', value: planet.mass_esi_score ?? 0 },
-      { axis: 'Temp', value: planet.teq_score ?? 0 },
-      { axis: 'HZ', value: planet.hz_score ?? 0 },
-      { axis: 'Tidal', value: planet.tidal_lock_score ?? 0 },
-      { axis: 'Flare', value: planet.flare_score ?? 0 },
+      { axis: 'Radius', value: planet.habitability.radius_esi_score ?? 0 },
+      { axis: 'Mass', value: planet.habitability.mass_esi_score ?? 0 },
+      { axis: 'Temp', value: planet.habitability.teq_score ?? 0 },
+      { axis: 'HZ', value: planet.habitability.hz_score ?? 0 },
+      { axis: 'Tidal', value: planet.anomaly_risk.tidal_lock_score ?? 0 },
+      { axis: 'Flare', value: planet.anomaly_risk.flare_score ?? 0 },
     ].filter(d => d.value > 0)
   }, [planet])
 
@@ -69,7 +69,7 @@ export default function PlanetDetailPanel({ name }: { name: string }) {
 
       <div>
         <p className="text-xs text-muted-foreground uppercase tracking-wider">Composite</p>
-        <p className="font-data text-2xl text-chart-1 mt-1">{planet.composite_score?.toFixed(4) ?? '—'}</p>
+        <p className="font-data text-2xl text-chart-1 mt-1">{planet.habitability.composite_score?.toFixed(4) ?? '—'}</p>
         {planet.cluster_name && (
           <Badge variant="secondary" className="text-xs mt-1">{planet.cluster_name}</Badge>
         )}
@@ -92,13 +92,13 @@ export default function PlanetDetailPanel({ name }: { name: string }) {
         </>
       )}
 
-      {planet.molecules.length > 0 && (
+      {planet.biosignatures.molecules.length > 0 && (
         <>
           <Separator />
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Detections</p>
             <div className="flex flex-wrap gap-1.5">
-              {[...new Set(planet.molecules)].map((m, i) => (
+              {[...new Set(planet.biosignatures.molecules)].map((m, i) => (
                 <Badge key={i} variant="secondary" className="font-data text-xs">{m.toUpperCase()}</Badge>
               ))}
             </div>
@@ -131,12 +131,12 @@ export default function PlanetDetailPanel({ name }: { name: string }) {
         </>
       )}
 
-      {planet.anomaly_types.length > 0 && (
+      {planet.anomaly_risk.anomaly_types.length > 0 && (
         <>
           <Separator />
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Anomalies</p>
-            {planet.anomaly_types.map((t, i) => (
+            {planet.anomaly_risk.anomaly_types.map((t, i) => (
               <div key={i} className="flex items-center gap-2 text-sm text-muted-foreground py-1">
                 <AlertTriangle className="w-3 h-3 text-destructive" /> {t}
               </div>

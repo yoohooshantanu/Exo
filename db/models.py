@@ -353,6 +353,28 @@ class MoleculeDetection(Base):
     planet = relationship("Planet", back_populates="molecule_detections")
 
 
+class AtmosphericRetrieval(Base):
+    __tablename__ = "atmospheric_retrievals"
+
+    retrieval_id = Column(UUID(as_uuid=False), primary_key=True,
+                          server_default=text("gen_random_uuid()"))
+    planet_id = Column(UUID(as_uuid=False),
+                       ForeignKey("planets.planet_id", ondelete="CASCADE"),
+                       nullable=False, index=True)
+    spec_id = Column(Text, nullable=False, index=True)
+    model_name = Column(Text, nullable=False) # e.g. "PLATON_v1"
+    run_time_seconds = Column(Float)
+    best_fit_params = Column(JSONB) # e.g. {"metallicity": 1.0, "C/O": 0.5, "cloud_top_pressure": 1e4}
+    evidence_ln_z = Column(Float)
+    posterior_file = Column(Text) # Path to saved posterior data (e.g. JSON or NPZ)
+    status = Column(Text, server_default="running") # running, completed, failed
+    error_message = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
+
+    planet = relationship("Planet")
+
+
+
 class HitranLine(Base):
     __tablename__ = "hitran_lines"
 

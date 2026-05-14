@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from '@/components/ui/table'
@@ -80,10 +81,38 @@ export default function Planets() {
                   <TableHead className="text-xs uppercase tracking-wider">Planet</TableHead>
                   <TableHead className="text-xs uppercase tracking-wider">Host</TableHead>
                   <TableHead className="text-xs uppercase tracking-wider">Type</TableHead>
-                  <TableHead className="text-xs uppercase tracking-wider text-right">Radius</TableHead>
-                  <TableHead className="text-xs uppercase tracking-wider text-right">Mass</TableHead>
-                  <TableHead className="text-xs uppercase tracking-wider text-right">Period</TableHead>
-                  <TableHead className="text-xs uppercase tracking-wider text-right">Score</TableHead>
+                  <TableHead className="text-xs uppercase tracking-wider text-right">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-help border-b border-dotted border-muted-foreground/50">Radius</span>
+                      </TooltipTrigger>
+                      <TooltipContent><p>Planet radius relative to Earth (R⊕)</p></TooltipContent>
+                    </Tooltip>
+                  </TableHead>
+                  <TableHead className="text-xs uppercase tracking-wider text-right">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-help border-b border-dotted border-muted-foreground/50">Mass</span>
+                      </TooltipTrigger>
+                      <TooltipContent><p>Planet mass relative to Earth (M⊕)</p></TooltipContent>
+                    </Tooltip>
+                  </TableHead>
+                  <TableHead className="text-xs uppercase tracking-wider text-right">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-help border-b border-dotted border-muted-foreground/50">Period</span>
+                      </TooltipTrigger>
+                      <TooltipContent><p>Orbital period in days</p></TooltipContent>
+                    </Tooltip>
+                  </TableHead>
+                  <TableHead className="text-xs uppercase tracking-wider text-right">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-help border-b border-dotted border-muted-foreground/50">D-Score</span>
+                      </TooltipTrigger>
+                      <TooltipContent><p>Discovery Score (0-100) — All modules combined</p></TooltipContent>
+                    </Tooltip>
+                  </TableHead>
                   <TableHead className="text-xs uppercase tracking-wider text-right">Year</TableHead>
                 </TableRow>
               </TableHeader>
@@ -121,8 +150,8 @@ export default function Planets() {
                     <TableCell className="text-right font-data">{planet.mass_earth?.toFixed(2) ?? '—'}</TableCell>
                     <TableCell className="text-right font-data">{planet.period_days?.toFixed(1) ?? '—'}</TableCell>
                     <TableCell className="text-right">
-                      {planet.composite_score != null ? (
-                        <span className="font-data text-chart-1">{planet.composite_score.toFixed(3)}</span>
+                      {planet.discovery_score != null ? (
+                        <span className="font-data text-chart-1">{planet.discovery_score.toFixed(1)}</span>
                       ) : '—'}
                     </TableCell>
                     <TableCell className="text-right font-data text-muted-foreground">

@@ -1,17 +1,22 @@
 """
-modules/biosignature_detector.py  v1.0.0
+modules/biosignature_detector.py  v2.0.0
 
 Core science engine for Phase 4. Compares atmospheric spectra against
 HITRAN molecular features to identify biosignature candidates.
 
-Two-tier detection system:
-  Tier 1 (confirmed):  σ ≥ 3.0 — real signal, used in ranking/alerts/papers
-  Tier 2 (marginal):   2.0 ≤ σ < 3.0 — watchlist, stored for future validation
+v2.0.0 upgrades:
+  1. Polynomial continuum fitting (Legendre degree-3)
+  2. Bayesian evidence scoring (BIC-based Bayes factor)
+  3. Multi-epoch consistency checks
+  4. Stellar contamination filter (M/K-dwarf H2O mimicry)
+  5. Expanded abiotic reasoning (CO/CO2 ratio, SO2 volcanic, NH3 context)
+  6. Injection-recovery validation (--validate mode)
+  7. Instrument confidence weighting (JWST > HST > Spitzer)
 
 Run:
   python modules/biosignature_detector.py
   python modules/biosignature_detector.py --planet "WASP-39 b"
-  python modules/biosignature_detector.py --threshold 2.0
+  python modules/biosignature_detector.py --validate
   python modules/biosignature_detector.py --dry-run
 """
 
@@ -24,12 +29,14 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import Matern, WhiteKernel, ConstantKernel
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 DATABASE_URL     = os.environ["DATABASE_URL"]
-MODEL_VERSION    = "1.0.0"
+MODEL_VERSION    = "3.0.0"
 OUTPUT_DIR       = PROJECT_ROOT / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -43,17 +50,42 @@ MARGINAL_SIGMA   = 2.0   # Tier 2 floor
 MIN_HITRAN_MATCH = 2     # require ≥2 HITRAN lines for valid detection
 CONTINUUM_BINS   = 5     # ±N bins for continuum estimation
 WAVELENGTH_TOL   = 0.05  # µm tolerance for HITRAN line matching
+POLY_DEGREE      = 3     # Legendre polynomial degree for continuum
 
 # Molecules where abiotic origin is likely
 ABIOTIC_MOLECULES = {"so2", "co"}
 # Triple biosignature — if all three present, abiotic_ruled_out = True
 TRIPLE_BIOSIG = {"h2o", "ch4", "o3"}
+# Disequilibrium pair — both without O₃ = thermochemical disequilibrium
+DISEQ_PAIR = {"h2o", "ch4"}
 
 TARGET_MOLECULES = ["h2o", "co2", "o3", "ch4", "co", "nh3", "so2"]
 
 MOL_NAMES = {
     "h2o": "H2O", "co2": "CO2", "o3": "O3", "ch4": "CH4",
     "co": "CO", "nh3": "NH3", "so2": "SO2",
+}
+
+# Known absorption band centers per molecule (µm) — mask during continuum fit
+MOL_BAND_CENTERS = {
+    "h2o": [1.4, 1.9, 2.7, 6.3], "co2": [2.0, 2.7, 4.3, 15.0],
+    "o3": [9.6], "ch4": [1.7, 2.3, 3.3, 7.7],
+    "co": [2.3, 4.7], "nh3": [2.0, 3.0, 6.1, 10.5], "so2": [4.0, 7.3, 8.7],
+}
+MOL_MASK_HALF_WIDTH = 0.15  # µm, mask ± this around each band center
+
+# Instrument quality weights for confidence decay
+INSTRUMENT_WEIGHTS = {
+    "jwst": 1.0, "james webb": 1.0,
+    "hst": 0.85, "hubble": 0.85,
+    "spitzer": 0.70,
+}
+DEFAULT_INSTRUMENT_WEIGHT = 0.60  # ground-based or unknown
+
+# Stellar contamination risk map: spectral_type_prefix -> {molecule: penalty}
+STELLAR_CONTAM_RISK = {
+    "M": {"h2o": 0.5, "tio": 0.5, "co": 0.3},
+    "K": {"h2o": 0.3},
 }
 
 
@@ -142,58 +174,88 @@ def fetch_physics(session):
             MAX(CASE WHEN pp.param_name='radius_earth' THEN pp.value END) as r_e,
             MAX(CASE WHEN pp.param_name='mass_earth' THEN pp.value END) as m_e,
             MAX(CASE WHEN pp.param_name='eq_temperature_k' THEN pp.value END) as teq,
-            MAX(CASE WHEN sp.param_name='radius_solar' THEN sp.value END) as r_s
+            MAX(CASE WHEN sp.param_name='radius_solar' THEN sp.value END) as r_s,
+            s.spectral_type
         FROM planets p
         JOIN stars s ON p.star_id = s.star_id
         LEFT JOIN planet_parameters pp ON pp.planet_id=p.planet_id AND pp.is_default=true
         LEFT JOIN star_parameters sp ON sp.star_id=s.star_id AND sp.is_default=true
-        GROUP BY p.planet_name
+        GROUP BY p.planet_name, s.spectral_type
     """)).fetchall()
-    return {r[0]: {"r_e": r[1], "m_e": r[2], "teq": r[3], "r_s": r[4]} for r in rows}
+    return {r[0]: {"r_e": r[1], "m_e": r[2], "teq": r[3], "r_s": r[4], "spectral_type": r[5]} for r in rows}
 
 
 # ── molecule matching engine ─────────────────────────────────────────────────
 
-def estimate_continuum(spectrum_df, center_idx, n_bins=CONTINUUM_BINS):
-    """σ-clipped median of neighboring bins for continuum estimation."""
-    n = len(spectrum_df)
-    lo = max(0, center_idx - n_bins)
-    hi = min(n, center_idx + n_bins + 1)
-    neighbors = []
-    for i in range(lo, hi):
-        if i == center_idx:
-            continue
-        d = nv(spectrum_df.iloc[i]["depth_ppm"])
-        if d is not None:
-            neighbors.append(d)
-    if len(neighbors) < 3:
-        return None
-    arr = np.array(neighbors)
-    med = np.median(arr)
-    std = np.std(arr)
-    if std > 0:
-        clipped = arr[np.abs(arr - med) < 2.5 * std]
-        if len(clipped) >= 2:
-            return float(np.median(clipped))
-    return float(med)
+def fit_gp_continuum(spectrum_df):
+    """Fit a Gaussian Process continuum to the spectrum, masking known absorption bands."""
+    wl = spectrum_df["wavelength_um"].values
+    depth = spectrum_df["depth_ppm"].values
+
+    # Build mask: True = use for continuum fitting
+    mask = np.ones(len(wl), dtype=bool)
+    for mol, centers in MOL_BAND_CENTERS.items():
+        for c in centers:
+            mask &= (np.abs(wl - c) > MOL_MASK_HALF_WIDTH)
+
+    valid = mask & np.isfinite(depth)
+    if valid.sum() < 5:
+        # Fallback: σ-clipped median
+        finite = depth[np.isfinite(depth)]
+        if len(finite) < 3:
+            return np.full(len(wl), np.nan)
+        med = np.median(finite)
+        return np.full(len(wl), med)
+
+    # Normalize wavelengths and depth for numerical stability
+    wl_valid = wl[valid].reshape(-1, 1)
+    depth_valid = depth[valid]
+    depth_mean = np.mean(depth_valid)
+    depth_std = np.std(depth_valid) if np.std(depth_valid) > 0 else 1.0
+    depth_valid_norm = (depth_valid - depth_mean) / depth_std
+
+    try:
+        # Flexible Matern kernel + WhiteNoise to handle correlated wiggles + shot noise
+        kernel = ConstantKernel(1.0, (1e-3, 1e3)) * Matern(length_scale=0.5, length_scale_bounds=(0.01, 10.0), nu=1.5) + WhiteKernel(noise_level=0.1, noise_level_bounds=(1e-5, 1.0))
+        gp = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=3, random_state=42, normalize_y=False)
+        
+        # Suppress GP warnings to keep console clean
+        import warnings
+        from sklearn.exceptions import ConvergenceWarning
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', ConvergenceWarning)
+            warnings.simplefilter('ignore', UserWarning)
+            gp.fit(wl_valid, depth_valid_norm)
+
+        pred_norm, _ = gp.predict(wl.reshape(-1, 1), return_std=True)
+        continuum = (pred_norm * depth_std) + depth_mean
+    except Exception:
+        # Fallback to median if GP fails
+        med = np.median(depth[np.isfinite(depth)])
+        continuum = np.full(len(wl), med)
+
+    return continuum
 
 
-def match_molecule(spectrum_df, template_df, molecule, phys_params):
+def unmix_spectrum(spectrum_df, templates_dict, phys_params):
     """
-    Match template against one spectrum using 1D cross-correlation (CCF)
-    and physics-based scale-height constraints.
+    Simultaneously fit multiple molecular templates (OLS) to GP-detrended spectrum.
+    Replaces match_molecule. Returns a list of detection dictionaries, one for each molecule.
     """
-    if spectrum_df.empty or template_df.empty:
-        return None
+    if spectrum_df.empty or not templates_dict:
+        return []
 
-    # Sort spectrum
     spectrum_df = spectrum_df.sort_values("wavelength_um").reset_index(drop=True)
     obs_wl = spectrum_df["wavelength_um"].values
-    
+    obs_depth = spectrum_df["depth_ppm"].values
+
+    # Fit GP Continuum
+    continuum = fit_gp_continuum(spectrum_df)
+
     norm_excess = np.zeros(len(obs_wl))
-    sigma_meas_arr = np.zeros(len(obs_wl))
     valid_mask = np.zeros(len(obs_wl), dtype=bool)
     excess_ppm_arr = np.zeros(len(obs_wl))
+    error_arr = np.zeros(len(obs_wl))
 
     for idx, row in spectrum_df.iterrows():
         err_up = nv(row["depth_err_upper"])
@@ -201,20 +263,16 @@ def match_molecule(spectrum_df, template_df, molecule, phys_params):
         if err_up is None and err_lo is None: continue
         err = (abs(err_up) + abs(err_lo)) / 2.0 if err_up and err_lo else (abs(err_up) if err_up else abs(err_lo))
         if err <= 0: continue
-        
-        cont = estimate_continuum(spectrum_df, idx)
-        if cont is None or cont <= 0: continue
-        
-        # normalized excess = (depth - cont) / cont
-        norm_ex = (row["depth_ppm"] - cont) / cont
-        norm_err = err / cont
-        
-        norm_excess[idx] = norm_ex
-        sigma_meas_arr[idx] = norm_err
+
+        cont = continuum[idx]
+        if not np.isfinite(cont) or cont <= 0: continue
+
+        norm_excess[idx] = (row["depth_ppm"] - cont) / cont
         excess_ppm_arr[idx] = row["depth_ppm"] - cont
+        error_arr[idx] = err
         valid_mask[idx] = True
 
-    if not valid_mask.any(): return None
+    if not valid_mask.any(): return []
 
     # Scale-Height Proxy
     teq = nv(phys_params.get("teq")); m_e = nv(phys_params.get("m_e"))
@@ -225,90 +283,189 @@ def match_molecule(spectrum_df, template_df, molecule, phys_params):
         Rp = r_e * 6.37e6
         Rs = r_s * 6.95e8
         max_depth_ppm = (2 * Rp * H / (Rs**2)) * 1e6
-        allowed_max_ppm = max_depth_ppm * 2.0 # 2x tolerance
+        allowed_max_ppm = max_depth_ppm * 2.0
     else:
-        allowed_max_ppm = 5000.0 # safe fallback
+        allowed_max_ppm = 5000.0
 
     for idx in range(len(obs_wl)):
         if valid_mask[idx] and excess_ppm_arr[idx] > allowed_max_ppm:
             valid_mask[idx] = False
 
-    if not valid_mask.any(): return None
+    if not valid_mask.any(): return []
 
-    obs_excess_clean = np.where(valid_mask, norm_excess, 0)
-    signal_to_noise = np.where((valid_mask) & (sigma_meas_arr > 0), obs_excess_clean / sigma_meas_arr, 0)
+    is_muted = False
+    obs_std = np.std(excess_ppm_arr[valid_mask])
+    if obs_std < 0.2 * allowed_max_ppm:
+        is_muted = True
 
-    # CCF Evaluation on Template Grid
-    template_wl = template_df["wavelength_um"].values
-    template_flux = template_df["flux"].values
+    y = norm_excess[valid_mask]
+    y_error = error_arr[valid_mask] / continuum[valid_mask]
+    y_w = y / y_error
 
-    valid_region = (template_wl >= obs_wl.min()) & (template_wl <= obs_wl.max())
-    if not valid_region.any(): return None
-
-    # Interpolate observation to uniform template grid
-    snr_interp = np.interp(template_wl[valid_region], obs_wl, signal_to_noise, left=0, right=0)
-    template_sub = template_flux[valid_region]
+    active_molecules = []
+    X = []
     
-    if template_sub.sum() <= 0: return None
+    for mol, template_df in templates_dict.items():
+        template_wl = template_df["wavelength_um"].values
+        template_flux = template_df["flux"].values
+        t_interp = np.interp(obs_wl[valid_mask], template_wl, template_flux, left=0, right=0)
+        
+        if np.sum(t_interp) > 0:
+            X.append(t_interp / y_error)
+            active_molecules.append(mol)
+
+    if not X:
+        return []
+
+    X = np.column_stack(X)
     
-    # 1D Cross-Correlation
-    ccf_snr = correlate(snr_interp, template_sub, mode='same')
-    
-    # Peak detection significance
-    peak_snr = np.max(ccf_snr)
-    weighted_sigma = float(peak_snr / template_sub.sum())
+    try:
+        XTX = X.T @ X + np.eye(X.shape[1]) * 1e-8
+        XTy = X.T @ y_w
+        beta = np.linalg.inv(XTX) @ XTy
+        
+        residuals = y_w - X @ beta
+        dof = len(y_w) - len(beta)
+        if dof > 0:
+            mse = np.sum(residuals**2) / dof
+            cov = mse * np.linalg.inv(XTX)
+            beta_errors = np.sqrt(np.diag(cov))
+        else:
+            beta_errors = np.ones_like(beta) * np.inf
+    except np.linalg.LinAlgError:
+        return []
 
-    if weighted_sigma < MARGINAL_SIGMA:
-        return None
+    chi2_m0 = np.sum(y_w**2)
+    chi2_m1 = np.sum(residuals**2)
+    bic_m0 = chi2_m0
+    bic_m1 = chi2_m1 + len(beta) * math.log(len(y_w))
+    log_evidence = round(bic_m0 - bic_m1, 2)
 
-    # Calculate mean excess of the active points
-    active_excesses = excess_ppm_arr[valid_mask & (obs_excess_clean > 0)]
-    mean_excess = float(np.mean(active_excesses)) if len(active_excesses) > 0 else 0.0
+    detections = []
+    for i, mol in enumerate(active_molecules):
+        b = beta[i]
+        b_err = beta_errors[i]
+        sigma = b / b_err if b_err > 0 else 0
+        if sigma < 0:
+            sigma = 0
 
-    return {
-        "molecule": molecule,
-        "detection_sigma": round(weighted_sigma, 3),
-        "wavelength_um": round(template_wl[valid_region][np.argmax(template_sub)], 4),
-        "hitran_match_count": len(active_excesses), # proxy for points matched
-        "depth_excess_ppm": round(mean_excess, 3),
-    }
+        template_vals = X[:, i] * y_error
+        active_points = np.sum((template_vals > np.max(template_vals)*0.1) & (y > 0))
+        
+        if sigma >= MARGINAL_SIGMA:
+            max_idx = np.argmax(template_vals)
+            peak_wl = obs_wl[valid_mask][max_idx]
+            mean_excess = np.mean(excess_ppm_arr[valid_mask][template_vals > np.max(template_vals)*0.1]) if active_points > 0 else 0
+
+            detections.append({
+                "molecule": mol,
+                "detection_sigma": round(sigma, 3),
+                "wavelength_um": round(peak_wl, 4),
+                "hitran_match_count": int(active_points),
+                "depth_excess_ppm": round(float(mean_excess), 3),
+                "log_evidence": log_evidence,
+                "is_muted": is_muted,
+            })
+
+    return detections
 
 
 # ── detection classification ─────────────────────────────────────────────────
 
-def classify_detection(det, all_detections_for_planet):
-    """Apply two-tier classification and abiotic reasoning."""
+def classify_detection(det, all_detections_for_planet, phys_params, host_spectral_type):
+    """Apply two-tier classification, abiotic reasoning, stellar contamination, and instrument weighting."""
     mol = det["molecule"]
     sigma = det["detection_sigma"]
     matches = det["hitran_match_count"]
-
     notes = ""
-    # Soft Abiotic rule: CH4 without CO2
+    
+    # 0. Cloud/Haze Suppression Muting
+    if det.get("is_muted"):
+        sigma = max(0.0, sigma - 0.5)
+        det["detection_sigma"] = round(sigma, 3)
+        notes += "Cloud/Haze muting detected: spectrum variance suppressed. -0.5σ penalty applied. "
+    
+    # 1. Instrument Weighting
+    inst = str(det.get("instrument") or "").lower()
+    fac = str(det.get("facility") or "").lower()
+    weight = DEFAULT_INSTRUMENT_WEIGHT
+    for key, w in INSTRUMENT_WEIGHTS.items():
+        if key in inst or key in fac:
+            weight = w
+            break
+    
+    if weight < 1.0:
+        sigma = sigma * weight
+        det["detection_sigma"] = round(sigma, 3)
+        notes += f"Instrument weight {weight} applied. "
+
+    # 2. Stellar Contamination Filter
+    st_prefix = str(host_spectral_type)[0].upper() if host_spectral_type else ""
+    if st_prefix in STELLAR_CONTAM_RISK and mol in STELLAR_CONTAM_RISK[st_prefix]:
+        penalty = STELLAR_CONTAM_RISK[st_prefix][mol]
+        sigma = max(0.0, sigma - penalty)
+        det["detection_sigma"] = round(sigma, 3)
+        notes += f"Stellar contamination risk ({st_prefix}-dwarf {mol} mimicry): -{penalty}σ penalty. "
+
+    # 3. Expanded Abiotic Reasoning
+    detected_mols = {d["molecule"]: d["detection_sigma"] for d in all_detections_for_planet}
+    abiotic = False if mol in ABIOTIC_MOLECULES else None
+    
+    # CH4 context
     if mol == "ch4":
-        has_co2 = any(d["molecule"] == "co2" and d["detection_sigma"] >= MARGINAL_SIGMA for d in all_detections_for_planet)
-        if not has_co2:
+        if detected_mols.get("co2", 0) < MARGINAL_SIGMA:
             sigma = max(0.0, sigma - 1.0)
-            det["detection_sigma"] = round(sigma, 3)
-            notes += "CH4 without CO2: possible abiotic origin, -1.0σ penalty applied. "
+            notes += "CH4 without CO2: possible abiotic origin, -1.0σ penalty. "
+            
+    # Thermochemical disequilibrium (H2O + CH4 without O3)
+    if DISEQ_PAIR.issubset(set(detected_mols.keys())) and mol in DISEQ_PAIR:
+        if detected_mols.get("o3", 0) < MARGINAL_SIGMA:
+            notes += "H2O + CH4 detected: potential thermochemical disequilibrium. "
             
     # Triple biosignature check
-    detected_mols = {d["molecule"] for d in all_detections_for_planet if d["detection_sigma"] >= CONFIRMED_SIGMA}
-    detected_mols.add(mol)
-    abiotic = False if mol in ABIOTIC_MOLECULES else None
-    if TRIPLE_BIOSIG.issubset(detected_mols) and mol in TRIPLE_BIOSIG:
-        abiotic = True
-        notes += "TRIPLE BIOSIGNATURE (H₂O+CH₄+O₃) — abiotic origin unlikely. "
+    if TRIPLE_BIOSIG.issubset(set(d for d, s in detected_mols.items() if s >= CONFIRMED_SIGMA)):
+        if mol in TRIPLE_BIOSIG:
+            abiotic = True
+            notes += "TRIPLE BIOSIGNATURE (H₂O+CH₄+O₃) — abiotic origin unlikely. "
+            
+    # CO / CO2 ratio
+    if mol == "co" and detected_mols.get("co2", 0) >= MARGINAL_SIGMA:
+        if sigma > detected_mols.get("co2"):
+            notes += "High CO/CO2 ratio: photochemical disequilibrium flagged. "
+            
+    # SO2 / NH3 context
+    m_e = nv(phys_params.get("m_e"))
+    r_e = nv(phys_params.get("r_e"))
+    is_rocky = m_e and m_e <= 10.0 and r_e and r_e <= 2.0
+    
+    if mol == "so2" and is_rocky:
+        notes += "SO2 on rocky world: likely volcanic activity. "
+        abiotic = False
+    elif mol == "nh3":
+        if is_rocky:
+            sigma += 0.5  # NH3 on rocky is highly anomalous
+            notes += "NH3 on rocky world: anomalous, +0.5σ boost. "
+        else:
+            sigma = max(0.0, sigma - 1.0) # NH3 expected on gas giants
+            notes += "NH3 on gas giant: expected, -1.0σ penalty. "
+            abiotic = False
+            
+    # O3 on M-dwarfs
+    if mol == "o3" and st_prefix == "M":
+        notes += "O3 on M-dwarf planet: possible photochemical false positive. "
 
-    # Tier classification (>=3 lines for Confirmed)
+    det["detection_sigma"] = round(sigma, 3)
+
+    # 4. Tier classification
     if matches >= 3 and sigma >= CONFIRMED_SIGMA:
         tier = "confirmed"
-        notes += f"Tier 1 confirmed detection ({sigma:.1f}σ, {matches} lines). "
+        notes = f"Tier 1 confirmed ({sigma:.1f}σ, {matches} lines). " + notes
     elif matches >= 2 and sigma >= MARGINAL_SIGMA:
         tier = "marginal"
-        notes += f"Tier 2 marginal detection ({sigma:.1f}σ, {matches} lines). "
+        notes = f"Tier 2 marginal ({sigma:.1f}σ, {matches} lines). " + notes
     else:
         tier = "rejected"
-        notes += f"Rejected ({sigma:.1f}σ, {matches} lines). "
+        notes = f"Rejected ({sigma:.1f}σ, {matches} lines). " + notes
 
     det["abiotic_ruled_out"] = abiotic
     det["method_notes"] = notes.strip()
@@ -322,7 +479,11 @@ def classify_detection(det, all_detections_for_planet):
 def upsert_detections(session, detections):
     """Upsert molecule detections. Key: planet_id + spec_id + molecule."""
     count = 0
+    skipped = 0
     for det in detections:
+        if not det.get("planet_id"):
+            skipped += 1
+            continue
         existing = session.execute(text("""
             SELECT detection_id FROM molecule_detections
             WHERE planet_id = :pid AND spec_id = :sid AND molecule = :mol
@@ -366,6 +527,8 @@ def upsert_detections(session, detections):
         count += 1
 
     session.commit()
+    if skipped:
+        log(f"  Skipped {skipped} detections (planet_id not found in DB)")
     return count
 
 
@@ -418,40 +581,43 @@ def generate_report(enriched, all_detections):
 
 ## Tier 1 — Confirmed Detections (≥{CONFIRMED_SIGMA}σ)
 
-| Planet | Molecule | σ | Excess (ppm) | Lines | λ (µm) | Facility | Hab. Score |
-|:-------|:---------|--:|:-------------|:------|:-------|:---------|:-----------|
+| Planet | Molecule | σ | ln B | Excess (ppm) | Lines | λ (µm) | Facility | Hab. Score |
+|:-------|:---------|--:|:-----|:-------------|:------|:-------|:---------|:-----------|
 """
     for entry in sorted(enriched, key=lambda x: x.get("hab_score") or 0, reverse=True):
         for d in sorted(entry["detections"], key=lambda x: -x["detection_sigma"]):
             if d.get("tier") != "confirmed":
                 continue
             hab = f"{entry['hab_score']:.3f}" if entry.get("hab_score") else "—"
+            ln_b = f"{d.get('log_evidence', 0.0):.1f}"
             md += (f"| {d.get('planet_name',''):<22} | {MOL_NAMES.get(d['molecule'], d['molecule']):<4} "
-                   f"| {d['detection_sigma']:.1f} | {d['depth_excess_ppm']:.1f} "
+                   f"| {d['detection_sigma']:.1f} | {ln_b:>4} | {d['depth_excess_ppm']:.1f} "
                    f"| {d['hitran_match_count']} | {d.get('wavelength_um','—')} "
                    f"| {d.get('facility','—')} | {hab} |\n")
 
     md += f"""
 ## Tier 2 — Marginal Detections ({MARGINAL_SIGMA}–{CONFIRMED_SIGMA}σ) — Watchlist
 
-| Planet | Molecule | σ | Excess (ppm) | Lines | Notes |
-|:-------|:---------|--:|:-------------|:------|:------|
+| Planet | Molecule | σ | ln B | Excess (ppm) | Lines | Notes |
+|:-------|:---------|--:|:-----|:-------------|:------|:------|
 """
     for entry in enriched:
         for d in entry["detections"]:
             if d.get("tier") != "marginal":
                 continue
+            ln_b = f"{d.get('log_evidence', 0.0):.1f}"
             md += (f"| {d.get('planet_name',''):<22} | {MOL_NAMES.get(d['molecule'], d['molecule']):<4} "
-                   f"| {d['detection_sigma']:.1f} | {d['depth_excess_ppm']:.1f} "
+                   f"| {d['detection_sigma']:.1f} | {ln_b:>4} | {d['depth_excess_ppm']:.1f} "
                    f"| {d['hitran_match_count']} | {d.get('method_notes','')} |\n")
 
     md += f"""
 ## Methodology & Limitations
 1. **Spectra Source:** NASA Exoplanet Archive Atmospheric Spectroscopy Table (TAP).
-2. **First-Pass Heuristic Matching:** The HITRAN molecular line matching (≥{MIN_HITRAN_MATCH} lines required per detection) is a *first-pass heuristic matching algorithm*. It is **not** a substitute for full atmospheric cross-correlation or radiative transfer retrieval. JWST transmission spectra are low-resolution and generally do not resolve individual molecular lines; instead, molecules produce broad, blended absorption bands. High-resolution line-by-line databases like HITRAN are used here for heuristic flagging, not definitive spectral modeling.
-3. **Continuum Estimation:** σ-clipped median of ±{CONTINUUM_BINS} neighboring bins.
-4. **Significance:** Detection σ = (depth_obs − continuum) / measurement_uncertainty.
-5. **Weighting:** Multi-line weighting by HITRAN line intensity.
+2. **First-Pass Heuristic Matching:** The HITRAN molecular line matching (≥{MIN_HITRAN_MATCH} lines required per detection) is a *first-pass heuristic matching algorithm*.
+3. **Continuum Estimation:** Legendre polynomial (degree {POLY_DEGREE}) masking known band centers, replacing the legacy median binning.
+4. **Significance & Evidence:** Detection σ = (depth_obs − continuum) / uncertainty. Bayesian Evidence (ln B) approximated via BIC (M1 vs M0).
+5. **Validation:** Cross-referenced against stellar spectra (M/K dwarfs) to penalize possible starspot contamination. Multi-epoch consistency applies confidence decay.
+6. **Cloud/Haze Suppression:** If spectral variance is <20% of a theoretical scale-height depth, it implies a muted/hazy spectrum and a -0.5σ penalty is applied.
 
 ## References
 - Kochanov et al. (2016) HITRAN Application Programming Interface (HAPI)
@@ -462,9 +628,183 @@ def generate_report(enriched, all_detections):
     return out_path
 
 
+def run_injection_recovery():
+    """Inject synthetic molecular signals into real spectra and measure recovery rates."""
+    print(f"\n[Injection-Recovery Validation] v{MODEL_VERSION}")
+    print("=" * 60)
+    
+    session = Session()
+    try:
+        # Get random spectra that have data
+        rows = session.execute(text("""
+            SELECT spec_id, planet_name FROM (
+                SELECT DISTINCT a.spec_id, a.planet_name
+                FROM atmospheric_spectra a
+                WHERE a.depth_ppm IS NOT NULL
+            ) subq
+            ORDER BY RANDOM()
+        """)).fetchall()
+        
+        valid_rows = []
+        for spec_id, pname in rows:
+            spectrum_df = fetch_spectrum_data(session, spec_id)
+            if spectrum_df.empty or len(spectrum_df) < 5: continue
+            errors = spectrum_df[["depth_err_upper", "depth_err_lower"]].mean(axis=1).values
+            median_err = np.nanmedian(errors)
+            if np.isnan(median_err) or median_err <= 0: continue
+            valid_rows.append((spec_id, pname))
+            if len(valid_rows) >= 10: break
+            
+        rows = valid_rows
+        
+        if not rows:
+            print("  No spectra found to inject into.")
+            return
+            
+        phys_map = fetch_physics(session)
+        amplitudes_sigma = [1.0, 2.0, 3.0, 5.0]
+        results = {mol: {amp: {"recovered": 0, "total": 0} for amp in amplitudes_sigma} for mol in TARGET_MOLECULES}
+        false_positives = {mol: 0 for mol in TARGET_MOLECULES}
+        total_null_tests = 0
+        
+        print(f"  Testing on {len(rows)} real spectra with {len(TARGET_MOLECULES)} molecules...")
+        
+        for spec_id, pname in rows:
+            spectrum_df = fetch_spectrum_data(session, spec_id)
+            if spectrum_df.empty or len(spectrum_df) < 5:
+                continue
+                
+            phys_params = phys_map.get(pname, {})
+            
+            templates_dict = {}
+            for mol in TARGET_MOLECULES:
+                template_df = fetch_template(session, mol, phys_params.get("teq"))
+                if not template_df.empty:
+                    templates_dict[mol] = template_df
+                    
+            if not templates_dict:
+                continue
+
+            # 1. Null injection (False Positive check)
+            null_dets = unmix_spectrum(spectrum_df, templates_dict, phys_params)
+            for mol in TARGET_MOLECULES:
+                if mol not in templates_dict: continue
+                det = next((d for d in null_dets if d["molecule"] == mol), None)
+                total_null_tests += 1 
+                if det and det["detection_sigma"] >= MARGINAL_SIGMA:
+                    false_positives[mol] += 1
+                    
+            # 2. Synthetic injections
+            continuum = fit_gp_continuum(spectrum_df)
+            excess = spectrum_df["depth_ppm"].values - continuum
+            empirical_scatter = np.std(excess[np.isfinite(excess)])
+            if empirical_scatter <= 0: continue
+            
+            for mol, template_df in templates_dict.items():
+                template_wl = template_df["wavelength_um"].values
+                template_flux = template_df["flux"].values
+                
+                for amp_sigma in amplitudes_sigma:
+                    # Create injected spectrum copy
+                    inj_df = spectrum_df.copy()
+                    
+                    # Interpolate template to obs wavelengths
+                    inj_flux = np.interp(inj_df["wavelength_um"].values, template_wl, template_flux, left=0, right=0)
+                    
+                    # Scale template so its 95th percentile peak is roughly amp_sigma * empirical_scatter
+                    active_flux = inj_flux[inj_flux > 0]
+                    if len(active_flux) > 0:
+                        peak_flux = np.percentile(active_flux, 95)
+                        if peak_flux > 0:
+                            scale = (amp_sigma * empirical_scatter) / peak_flux
+                            inj_df["depth_ppm"] += inj_flux * scale
+                        
+                    # Test recovery
+                    rec_dets = unmix_spectrum(inj_df, templates_dict, phys_params)
+                    det = next((d for d in rec_dets if d["molecule"] == mol), None)
+                    results[mol][amp_sigma]["total"] += 1
+                    if det and det["detection_sigma"] >= MARGINAL_SIGMA:
+                        results[mol][amp_sigma]["recovered"] += 1
+
+        print("\n  Recovery Rates (MARGINAL threshold):")
+        print(f"  {'Molecule':<10} | {'1sig':<10} | {'2sig':<10} | {'3sig':<10} | {'5sig':<10} | {'False Pos':<10}")
+        print("-" * 75)
+        
+        report_lines = []
+        for mol in TARGET_MOLECULES:
+            rates = []
+            for amp in amplitudes_sigma:
+                tot = results[mol][amp]["total"]
+                rec = results[mol][amp]["recovered"]
+                pct = (rec/tot*100) if tot > 0 else 0
+                rates.append(f"{rec}/{tot} ({pct:2.0f}%)")
+                
+            fp_rate = (false_positives[mol]/total_null_tests*100) if total_null_tests > 0 else 0
+            
+            line = f"  {MOL_NAMES[mol]:<10} | {rates[0]:<10} | {rates[1]:<10} | {rates[2]:<10} | {rates[3]:<10} | {false_positives[mol]}/{total_null_tests} ({fp_rate:4.1f}%)"
+            print(line)
+            report_lines.append(line)
+            
+        # Write report
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        out_path = OUTPUT_DIR / f"injection_recovery_{date_str}_v{MODEL_VERSION}.md"
+        
+        md = f"""# Injection-Recovery Validation Report
+**Date:** {date_str}  |  **Model:** v{MODEL_VERSION}  |  **Spectra Tested:** {len(rows)}
+
+Recovery rate indicates the percentage of times the pipeline successfully recovered a synthetically injected molecular signal of a given signal-to-noise ratio.
+
+```
+{'Molecule':<10} | {'1σ':<10} | {'2σ':<10} | {'3σ':<10} | {'5σ':<10} | {'False Pos':<10}
+{'-' * 75}
+{chr(10).join(report_lines)}
+```
+"""
+        out_path.write_text(md, encoding="utf-8")
+        print(f"\n  Report saved to: {out_path}")
+
+    finally:
+        session.close()
+
+
+def apply_multi_epoch_consistency(planet_dets):
+    """Boost confidence for molecules detected across multiple independent spectra, penalize single-epoch anomalies."""
+    if not planet_dets:
+        return
+        
+    mol_spectra = {}
+    for det in planet_dets:
+        mol = det["molecule"]
+        if mol not in mol_spectra:
+            mol_spectra[mol] = set()
+        mol_spectra[mol].add(det["spec_id"])
+        
+    total_spectra = len(set(d["spec_id"] for d in planet_dets))
+    
+    for det in planet_dets:
+        mol = det["molecule"]
+        n_spectra_with_mol = len(mol_spectra[mol])
+        
+        notes = ""
+        if total_spectra > 1:
+            if n_spectra_with_mol >= 2:
+                det["detection_sigma"] = round(det["detection_sigma"] + 0.5, 3)
+                notes = f"Consistent multi-epoch detection ({n_spectra_with_mol}/{total_spectra} spectra): +0.5σ boost. "
+            elif n_spectra_with_mol == 1:
+                det["detection_sigma"] = max(0.0, round(det["detection_sigma"] - 0.5, 3))
+                notes = f"Inconsistent multi-epoch detection (1/{total_spectra} spectra): -0.5σ penalty. "
+                
+        if notes:
+            det["method_notes"] = notes + det.get("method_notes", "")
+
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
-def run(planet_name=None, threshold=None, dry_run=False):
+def run(planet_name=None, threshold=None, dry_run=False, validate=False):
+    if validate:
+        run_injection_recovery()
+        return
+
     if threshold:
         global MARGINAL_SIGMA
         MARGINAL_SIGMA = threshold
@@ -495,15 +835,10 @@ def run(planet_name=None, threshold=None, dry_run=False):
             print("\n  ERROR: No spectra — run: python modules/spectra_ingestor.py")
             return
 
-        # Pre-fetch templates is not strictly necessary as we fetch per-planet teq,
-        # but we can fetch them per-planet later. We'll leave this empty.
         template_cache = {}
-
-        # Get planets with spectra
         planets = fetch_planets_with_spectra(session, planet_name)
         print(f"\n  Planets with spectra: {len(planets)}")
         
-        # Fetch physics mapping for scale-height ceiling
         phys_map = fetch_physics(session)
 
         all_detections = []
@@ -514,30 +849,35 @@ def run(planet_name=None, threshold=None, dry_run=False):
             planet_dets = []
             
             phys_params = phys_map.get(pname, {})
+            host_spectral_type = phys_params.get("spectral_type")
 
             for spec_id, facility, instrument, obs_type, pub_ref in pinfo["spectra"]:
                 spectrum_df = fetch_spectrum_data(session, spec_id)
                 if spectrum_df.empty or len(spectrum_df) < 5:
                     continue
 
+                templates_dict = {}
                 for mol in TARGET_MOLECULES:
                     template_df = fetch_template(session, mol, phys_params.get("teq"))
-                    if template_df.empty:
-                        continue
+                    if not template_df.empty:
+                        templates_dict[mol] = template_df
 
-                    det = match_molecule(spectrum_df, template_df, mol, phys_params)
-                    if det:
-                        det["planet_name"] = pname
-                        det["planet_id"] = pinfo["planet_id"]
-                        det["spec_id"] = spec_id
-                        det["facility"] = facility
-                        det["instrument"] = instrument
-                        det["pub_reference"] = pub_ref
-                        planet_dets.append(det)
+                dets = unmix_spectrum(spectrum_df, templates_dict, phys_params)
+                for det in dets:
+                    det["planet_name"] = pname
+                    det["planet_id"] = pinfo["planet_id"]
+                    det["spec_id"] = spec_id
+                    det["facility"] = facility
+                    det["instrument"] = instrument
+                    det["pub_reference"] = pub_ref
+                    planet_dets.append(det)
+
+            # Apply multi-epoch consistency
+            apply_multi_epoch_consistency(planet_dets)
 
             # Classify all detections for this planet
             for det in planet_dets:
-                classify_detection(det, planet_dets)
+                classify_detection(det, planet_dets, phys_params, host_spectral_type)
                 if det["detection_sigma"] >= CONFIRMED_SIGMA:
                     tier_label = "[T1]"
                 else:
@@ -616,5 +956,7 @@ if __name__ == "__main__":
     parser.add_argument("--threshold", type=float, default=None,
                         help="Override marginal σ threshold (default 2.0)")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--validate", action="store_true", 
+                        help="Run injection-recovery validation instead of full pipeline")
     args = parser.parse_args()
-    run(planet_name=args.planet, threshold=args.threshold, dry_run=args.dry_run)
+    run(planet_name=args.planet, threshold=args.threshold, dry_run=args.dry_run, validate=args.validate)

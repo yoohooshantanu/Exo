@@ -3,6 +3,7 @@ import { usePriorityTarget, useStats, useAlerts } from '@/hooks/useApi'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from '@/components/ui/table'
@@ -12,6 +13,7 @@ import {
 import { PieChart, Pie, Cell, Label, BarChart, Bar, XAxis, YAxis } from 'recharts'
 import AnimatedNumber from '@/components/AnimatedNumber'
 import { ArrowRight, TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react'
+import { formatAlertReason } from '@/lib/utils'
 import type { ChartConfig } from '@/components/ui/chart'
 
 function ts(dateStr?: string): string {
@@ -78,7 +80,10 @@ export default function Dashboard() {
             <div className="flex items-end justify-between gap-8">
               <div>
                 <p className="text-xs uppercase tracking-widest text-muted-foreground mb-3">
-                  Priority Target
+                  <Tooltip>
+                    <TooltipTrigger asChild><span className="cursor-help border-b border-dotted border-muted-foreground/50">Priority Target</span></TooltipTrigger>
+                    <TooltipContent><p>Highest Discovery Score — all modules combined</p></TooltipContent>
+                  </Tooltip>
                 </p>
                 <Link to={`/planets/${encodeURIComponent(target.planet_name)}`}>
                   <h1 className="text-4xl font-light tracking-tight text-foreground hover:text-chart-1 transition-colors cursor-pointer">
@@ -91,12 +96,12 @@ export default function Dashboard() {
               </div>
               <div className="text-right shrink-0">
                 <AnimatedNumber
-                  value={target.composite_score}
-                  decimals={3}
+                  value={target.discovery_score}
+                  decimals={1}
                   className="text-4xl font-light text-chart-1"
                 />
                 <p className="text-xs uppercase tracking-widest text-muted-foreground mt-1">
-                  Composite
+                  Discovery Score
                 </p>
               </div>
             </div>
@@ -240,7 +245,12 @@ export default function Dashboard() {
                 <TableHead>Timestamp</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Planet</TableHead>
-                <TableHead className="text-right">Score</TableHead>
+                <TableHead className="text-right">
+                  <Tooltip>
+                    <TooltipTrigger asChild><span className="cursor-help border-b border-dotted border-muted-foreground/50">Score</span></TooltipTrigger>
+                    <TooltipContent><p>Latest habitability score</p></TooltipContent>
+                  </Tooltip>
+                </TableHead>
                 <TableHead className="w-8"></TableHead>
               </TableRow>
             </TableHeader>
@@ -276,7 +286,14 @@ export default function Dashboard() {
                         {alert.score?.toFixed(3) ?? '—'}
                       </TableCell>
                       <TableCell>
-                        {isCritical && <AlertTriangle className="w-3.5 h-3.5 text-destructive" />}
+                        {isCritical && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <AlertTriangle className="w-3.5 h-3.5 text-destructive cursor-help outline-none" />
+                            </TooltipTrigger>
+                            <TooltipContent side="left"><p>{formatAlertReason(alert.alert_type, alert.detail)}</p></TooltipContent>
+                          </Tooltip>
+                        )}
                       </TableCell>
                     </TableRow>
                   )

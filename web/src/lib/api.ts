@@ -1,6 +1,6 @@
 const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000'
 
-async function fetchJson<T>(path: string, params?: Record<string, unknown>): Promise<T> {
+async function fetchJson<T>(path: string, params?: Record<string, unknown>, init?: RequestInit): Promise<T> {
   const url = new URL(path, API_URL)
   if (params) {
     Object.entries(params).forEach(([key, value]) => {
@@ -9,7 +9,7 @@ async function fetchJson<T>(path: string, params?: Record<string, unknown>): Pro
       }
     })
   }
-  const res = await fetch(url.toString())
+  const res = await fetch(url.toString(), init)
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}: ${res.statusText}`)
   }
@@ -24,7 +24,7 @@ export const api = {
   planets: (params: { page?: number; page_size?: number; method?: string; year_min?: number; year_max?: number; min_score?: number }) =>
     fetchJson<import('@/types').PaginatedResponse<import('@/types').PlanetListItem>>('/api/planets', params),
 
-  planet: (name: string) => fetchJson<import('@/types').PlanetDetail>(`/api/planets/${encodeURIComponent(name)}`),
+  planet: (name: string) => fetchJson<import('@/types').PlanetProfileVector>(`/api/planets/${encodeURIComponent(name)}`),
 
   spectrum: (name: string) => fetchJson<import('@/types').SpectrumView>(`/api/planets/${encodeURIComponent(name)}/spectrum`),
 
@@ -42,4 +42,16 @@ export const api = {
 
   alerts: (limit?: number) =>
     fetchJson<import('@/types').AlertItem[]>('/api/alerts', { limit }),
+
+  startRetrieval: (planetName: string, specId: string) =>
+    fetchJson<any>(`/api/planets/${encodeURIComponent(planetName)}/spectra/${encodeURIComponent(specId)}/retrieve`, undefined, { method: 'POST' }),
+
+  getRetrievals: (planetName: string, specId: string) =>
+    fetchJson<any[]>(`/api/planets/${encodeURIComponent(planetName)}/spectra/${encodeURIComponent(specId)}/retrievals`),
+
+  getPosterior: (retrievalId: string) =>
+    fetchJson<any>(`/api/retrievals/${encodeURIComponent(retrievalId)}/posterior`),
+
+  validationMetrics: () =>
+    fetchJson<any>('/api/validation/metrics'),
 }

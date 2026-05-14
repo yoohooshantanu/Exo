@@ -4,6 +4,22 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 
 
+class SystemPlanetItem(BaseModel):
+    planet_name: str
+    status: str
+    semi_major_axis_au: Optional[float]
+    period_days: Optional[float]
+    mass_earth: Optional[float]
+    radius_earth: Optional[float]
+
+class OrbitalGapItem(BaseModel):
+    predicted_period_days: float
+    stability_confidence: float
+    model_version: str
+    mass_min_earth: Optional[float]
+    mass_max_earth: Optional[float]
+    detection_method_hint: Optional[str]
+
 class PlanetListItem(BaseModel):
     planet_name: str
     hostname: Optional[str]
@@ -15,6 +31,7 @@ class PlanetListItem(BaseModel):
     eq_temperature_k: Optional[float]
     semi_major_axis_au: Optional[float]
     composite_score: Optional[float]
+    discovery_score: Optional[float]
     hz_score: Optional[float]
     cluster_name: Optional[str]
 
@@ -22,7 +39,39 @@ class PlanetListItem(BaseModel):
         from_attributes = True
 
 
-class PlanetDetail(BaseModel):
+class ProfileHabitability(BaseModel):
+    composite_score: Optional[float]
+    similarity_score: Optional[float]
+    hz_score: Optional[float]
+    teq_score: Optional[float]
+    radius_esi_score: Optional[float]
+    mass_esi_score: Optional[float]
+
+class ProfileBiosignatures(BaseModel):
+    biosig_count: int
+    molecules: List[str]
+    max_sigma: Optional[float]
+
+class ProfileConfidence(BaseModel):
+    has_spectra: bool
+    data_completeness: float
+    instrument_best: Optional[str]
+
+class ProfileAnomalyRisk(BaseModel):
+    anomaly_count: int
+    anomaly_types: List[str]
+    risk_score: Optional[float]
+    flare_score: Optional[float]
+    tidal_lock_score: Optional[float]
+
+class ScoreBreakdown(BaseModel):
+    habitability: float = 0.0
+    biosignature: float = 0.0
+    data_quality: float = 0.0
+    orbital_context: float = 0.0
+    anomaly_penalty: float = 0.0
+
+class PlanetProfileVector(BaseModel):
     planet_name: str
     planet_id: str
     hostname: Optional[str]
@@ -30,7 +79,8 @@ class PlanetDetail(BaseModel):
     status: str
     discovery_method: Optional[str]
     discovery_year: Optional[int]
-    # Params
+    
+    # Core Params
     radius_earth: Optional[float]
     mass_earth: Optional[float]
     period_days: Optional[float]
@@ -38,31 +88,26 @@ class PlanetDetail(BaseModel):
     semi_major_axis_au: Optional[float]
     eccentricity: Optional[float]
     density_earth: Optional[float]
-    # Scores
-    composite_score: Optional[float]
-    hz_score: Optional[float]
-    teq_score: Optional[float]
-    radius_esi_score: Optional[float]
-    mass_esi_score: Optional[float]
-    tidal_lock_score: Optional[float]
-    flare_score: Optional[float]
-    eccentricity_score: Optional[float]
-    age_score: Optional[float]
-    similarity_score: Optional[float]
-    risk_score: Optional[float]
-    # Cluster
+    
+    # Cluster Info
     cluster_label: Optional[int]
     cluster_name: Optional[str]
     distance_to_centroid: Optional[float]
-    # Anomalies
-    anomaly_count: int
-    anomaly_types: List[str]
-    # Biosigs
-    biosig_count: int
-    molecules: List[str]
-    # Gaps
-    gap_count: int
-
+    
+    # Unified Discovery Score (all modules combined)
+    discovery_score: float = 0.0
+    score_breakdown: ScoreBreakdown = ScoreBreakdown()
+    
+    # The 4 Core Vectors
+    habitability: ProfileHabitability
+    biosignatures: ProfileBiosignatures
+    confidence: ProfileConfidence
+    anomaly_risk: ProfileAnomalyRisk
+    
+    # System Architecture
+    system_planets: List[SystemPlanetItem] = []
+    orbital_gaps: List[OrbitalGapItem] = []
+    
     class Config:
         from_attributes = True
 
@@ -95,11 +140,14 @@ class HitranLineItem(BaseModel):
 class MoleculeDetectionItem(BaseModel):
     molecule: str
     detection_sigma: float
-    wavelength_um: Optional[float]
-    hitran_match_count: Optional[int]
-    abiotic_ruled_out: Optional[bool]
-    instrument: Optional[str]
-    facility: Optional[str]
+    wavelength_um: Optional[float] = None
+    hitran_match_count: Optional[int] = None
+    abiotic_ruled_out: Optional[bool] = None
+    instrument: Optional[str] = None
+    facility: Optional[str] = None
+    log_evidence: Optional[float] = None
+    is_muted: Optional[bool] = None
+    method_notes: Optional[str] = None
 
 
 class SpectrumView(BaseModel):
@@ -112,10 +160,25 @@ class SpectrumView(BaseModel):
     hitran_lines: List[HitranLineItem]
 
 
+class AtmosphericRetrievalItem(BaseModel):
+    retrieval_id: str
+    spec_id: str
+    model_name: str
+    status: str
+    run_time_seconds: Optional[float] = None
+    best_fit_params: Optional[dict] = None
+    evidence_ln_z: Optional[float] = None
+    error_message: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class RankingItem(BaseModel):
     planet_name: str
     hostname: Optional[str]
-    composite_score: Optional[float]
+    discovery_score: Optional[float]
     category: str
     detail: Optional[str]
 
@@ -172,7 +235,7 @@ class StarPositionsResponse(BaseModel):
 class PriorityTarget(BaseModel):
     planet_name: str
     hostname: Optional[str] = None
-    composite_score: float
+    discovery_score: float
     hz_score: Optional[float] = None
     cluster_name: Optional[str] = None
     radius_earth: Optional[float] = None

@@ -245,12 +245,15 @@ def nasa_sync_flow():
     logger = get_run_logger()
     logger.info("Starting nightly NASA sync ...")
 
-    df         = fetch_nasa_archive()
-    new_count  = upsert_planets_to_db(df)
+    # Import and run the robust ingestor
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from nasa_ingestor import run_ingestion
+    run_ingestion()
+    
     validation = run_validation_task()
 
-    logger.info(f"NASA sync complete — {new_count} new planets, validation={'PASS' if validation else 'FAIL'}")
-    return {"new_planets": new_count, "validation_passed": validation}
+    logger.info(f"NASA sync complete — validation={'PASS' if validation else 'FAIL'}")
+    return {"validation_passed": validation}
 
 
 @flow(

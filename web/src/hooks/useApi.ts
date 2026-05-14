@@ -70,3 +70,24 @@ export function useAlerts(limit = 50) {
     refetchInterval: 30_000, // Poll every 30s for new alerts
   })
 }
+
+export function useRetrievals(planetName: string, specId: string) {
+  return useQuery({
+    queryKey: ['retrievals', planetName, specId],
+    queryFn: () => api.getRetrievals(planetName, specId),
+    enabled: !!planetName && !!specId,
+    refetchInterval: (query) => {
+      const data = query.state.data as any[]
+      if (data?.some(r => r.status === 'running')) return 5000 // Poll every 5s if running
+      return false
+    }
+  })
+}
+
+export function usePosterior(retrievalId: string | null) {
+  return useQuery({
+    queryKey: ['posterior', retrievalId],
+    queryFn: () => api.getPosterior(retrievalId!),
+    enabled: !!retrievalId,
+  })
+}

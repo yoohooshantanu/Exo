@@ -6,6 +6,7 @@ import PlanetDetail from './pages/PlanetDetail'
 import StarMap from './pages/StarMap'
 import Alerts from './pages/Alerts'
 import Rankings from './pages/Rankings'
+import Validation from './pages/Validation'
 
 function App() {
   return (
@@ -17,6 +18,7 @@ function App() {
         <Route path="/stars" element={<StarMap />} />
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/rankings" element={<Rankings />} />
+        <Route path="/validation" element={<Validation />} />
       </Route>
     </Routes>
   )
