@@ -227,19 +227,19 @@ radius · density · period · equilibrium temperature · semi-major axis
 
 Cross-module joins that surface planets interesting across *multiple* scientific dimensions:
 
-```
-┌─────────────────────┐     ┌──────────────────────┐
-│   anomaly_flags     │──×──│  habitability_scores  │  →  Alert 1: Anomalous + Habitable
-└─────────────────────┘     └──────────────────────┘
+```mermaid
+flowchart LR
+    AF["anomaly_flags"] -- "JOIN" --> AH["🔴 Alert 1\nAnomalous + Habitable"]
+    HS["habitability_scores"] -- "JOIN" --> AH
 
-┌─────────────────────┐
-│  taxonomy_clusters  │  label = -1 or no NASA analog  →  Alert 2: Novel Taxonomy
-└─────────────────────┘
+    TC["taxonomy_clusters"] -- "label = -1\nor no NASA analog" --> NT["🟡 Alert 2\nNovel Taxonomy"]
 
-┌─────────────────────┐     ┌──────────────────────┐
-│ orbital_predictions │──×──│ molecule_detections   │  →  Alert 3: Gap + Biosignature
-└─────────────────────┘     └──────────────────────┘
-                                                        (highest priority for follow-up)
+    OP["orbital_predictions"] -- "JOIN" --> GB["🟢 Alert 3\nGap + Biosignature"]
+    MD["molecule_detections"] -- "JOIN" --> GB
+
+    style AH fill:#d32f2f,color:#fff,stroke:#b71c1c
+    style NT fill:#f9a825,color:#000,stroke:#f57f17
+    style GB fill:#2e7d32,color:#fff,stroke:#1b5e20
 ```
 
 ---
@@ -248,14 +248,13 @@ Cross-module joins that surface planets interesting across *multiple* scientific
 
 Computed on-demand in the API (`api/main.py`) — not stored in the database, derived live from module outputs:
 
-```
- ┌─────────────────────────────────────────────────────────────┐
- │                    Discovery Score (0-100)                   │
- ├───────────────┬───────────────┬──────────┬────────┬─────────┤
- │ Habitability  │ Biosignatures │ Data     │ Orbital│ Anomaly │
- │     /40       │     /25       │ Quality  │ Context│ Penalty │
- │               │               │   /15    │  /10   │  -10    │
- └───────────────┴───────────────┴──────────┴────────┴─────────┘
+```mermaid
+pie title Discovery Score Composition (100 pts)
+    "Habitability (40)" : 40
+    "Biosignatures (25)" : 25
+    "Data Quality (15)" : 15
+    "Orbital Context (10)" : 10
+    "Anomaly Penalty (-10)" : 10
 ```
 
 | Component | Max | Calculation |
@@ -286,47 +285,73 @@ $$\text{Discovery Score} = \text{clamp}(H + B + D + O + A, \enspace 0, \enspace 
 
 ## 🏗 Architecture
 
-```
-                          ┌──────────────────────────┐
-                          │     Prefect Scheduler     │
-                          │  nasa ─ arxiv ─ biosig    │
-                          │  anomaly ─ taxonomy ─ val │
-                          └────────────┬─────────────┘
-                                       │
-              ┌────────────────────────┼────────────────────────┐
-              ▼                        ▼                        ▼
-     ┌─────────────────┐    ┌───────────────────┐    ┌────────────────┐
-     │  Data Ingestors │    │ Scientific Modules │    │ Celery Workers │
-     │                 │    │                    │    │                │
-     │ · NASA TAP API  │    │ · Habitability     │    │ · PLATON       │
-     │ · arXiv RSS     │    │ · Orbital gaps     │    │   retrievals   │
-     │ · Spectra       │    │ · Biosignatures    │    │ · Async tasks  │
-     │ · HITRAN/ExoMol │    │ · Anomalies        │    │                │
-     │ · Gaia DR3      │    │ · Taxonomy         │    │                │
-     │                 │    │ · Synthesis         │    │                │
-     └────────┬────────┘    └─────────┬──────────┘    └───────┬────────┘
-              │                       │                       │
-              └───────────────────────┼───────────────────────┘
-                                      ▼
-                    ┌──────────────────────────────────┐
-                    │      PostgreSQL + PostGIS         │
-                    │                                  │
-                    │  17 tables · EAV parameters       │
-                    │  Full provenance chain            │
-                    │  Immutable prediction timestamps  │
-                    └────────────────┬─────────────────┘
-                                     │
-                        ┌────────────┴────────────┐
-                        ▼                         ▼
-               ┌────────────────┐       ┌──────────────────┐
-               │  FastAPI :8000 │       │  React App :5173 │
-               │                │◄─────►│                  │
-               │ · /api/planets │       │ · Planet profiles│
-               │ · /api/rankings│       │ · 3D star map    │
-               │ · /api/alerts  │       │ · Spectral viewer│
-               │ · /api/spectrum│       │ · Rankings       │
-               │ · /api/stats   │       │ · Alerts feed    │
-               └────────────────┘       └──────────────────┘
+```mermaid
+flowchart TD
+    subgraph Orchestration
+        SCHED["Prefect Scheduler"]
+    end
+
+    subgraph External["External Data Feeds"]
+        NASA["NASA Exoplanet Archive"]
+        ARXIV["arXiv astro-ph.EP"]
+        JWST["JWST / HST Spectra"]
+        HITRAN["HITRAN / ExoMol"]
+        GAIA["Gaia DR3"]
+    end
+
+    subgraph Ingestors["Data Ingestors"]
+        NI["nasa_ingestor"]
+        AW["arxiv_watcher"]
+        SI["spectra_ingestor"]
+        HS_SEED["hitran_seeder"]
+    end
+
+    subgraph Engines["Scientific Engines"]
+        HAB["Habitability Scorer\nv4.2.0"]
+        OGP["Orbital Gap Predictor\nv3.1.0"]
+        BIO["Biosignature Detector\nv3.0.0"]
+        ANOM["Anomaly Detector\nv1.0.0"]
+        TAX["Taxonomy Engine\nv1.0.0"]
+        SYN["Synthesis Engine\nv1.0.0"]
+    end
+
+    subgraph Storage["Database"]
+        PG[("PostgreSQL + PostGIS\n17 tables · EAV params\nFull provenance chain")]
+    end
+
+    subgraph Workers["Async Workers"]
+        CEL["Celery + Redis"]
+        PLAT["PLATON Retrieval"]
+    end
+
+    subgraph API_Layer["Web Tier"]
+        API["FastAPI :8000\n/planets · /rankings\n/alerts · /spectrum"]
+        WEB["React Dashboard :5173\nPlanet profiles · 3D map\nSpectral viewer · Alerts"]
+    end
+
+    SCHED --> NI & AW & SI
+    SCHED --> HAB & OGP & BIO & ANOM & TAX
+
+    NASA --> NI
+    ARXIV --> AW
+    JWST --> SI
+    HITRAN --> HS_SEED
+    GAIA --> NI
+
+    NI & AW & SI & HS_SEED --> PG
+    PG --> HAB & OGP & BIO & ANOM & TAX
+    HAB & OGP & BIO & ANOM & TAX --> SYN
+    SYN --> PG
+    HAB & OGP & BIO & ANOM & TAX --> PG
+
+    PG <--> API
+    API --> CEL --> PLAT --> PG
+    API <--> WEB
+
+    style PG fill:#1565c0,color:#fff,stroke:#0d47a1
+    style API fill:#00695c,color:#fff,stroke:#004d40
+    style WEB fill:#4a148c,color:#fff,stroke:#311b92
+    style SYN fill:#e65100,color:#fff,stroke:#bf360c
 ```
 
 <details>
