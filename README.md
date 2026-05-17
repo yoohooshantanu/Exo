@@ -5,6 +5,29 @@ There are over 6,000 confirmed exoplanets in the NASA archive. Each has measured
 
 I built this to do all of that in one place. The platform pulls the full NASA archive, scores every planet for habitability and environmental risk, runs N-body simulations to predict where undiscovered planets should be, matches spectra against HITRAN molecular lines, flags statistical outliers, and rolls everything into a single 0–100 **Discovery Score**. There's a FastAPI backend, a React dashboard with a 3D star map, and the whole thing runs from `docker-compose up`.
 
+```mermaid
+flowchart LR
+    A["NASA Archive\n6,224 planets"] --> B["Habitability\nScorer"]
+    A --> C["Orbital Gap\nPredictor"]
+    A --> D["Biosignature\nDetector"]
+    A --> E["Anomaly\nDetector"]
+    A --> F["Taxonomy\nEngine"]
+
+    B --> G["Synthesis Engine"]
+    C --> G
+    D --> G
+    E --> G
+    F --> G
+
+    G --> H["Discovery Score\n0 – 100"]
+    H --> I["React Dashboard\n+ FastAPI"]
+
+    style A fill:#1565c0,color:#fff,stroke:#0d47a1
+    style G fill:#e65100,color:#fff,stroke:#bf360c
+    style H fill:#2e7d32,color:#fff,stroke:#1b5e20
+    style I fill:#4a148c,color:#fff,stroke:#311b92
+```
+
 ## Table of Contents
 
 - [Why This Exists](#-why-this-exists)
