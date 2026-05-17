@@ -1,21 +1,9 @@
 
 # Exo — Exoplanet Discovery Platform
 
-> **6,224 confirmed worlds. Five analytical engines. One question: which planets are worth observing next?**
+There are over 6,000 confirmed exoplanets in the NASA archive. Each has measured radius, mass, orbital period, temperature, host star properties — but that data lives across different catalogs, and actually deciding which planets deserve follow-up observation means juggling habitability estimates, spectral data, orbital stability simulations, and anomaly detection separately.
 
-The NASA Exoplanet Archive has thousands of confirmed planets, each with dozens of measured parameters scattered across catalogs, papers, and instruments. But no single tool synthesizes all of these dimensions — habitability, atmospheric composition, orbital dynamics, anomalous properties — into a unified assessment.
-
-**Exo does that.** It ingests the full archive nightly, runs five independent scientific modules against every planet, and produces a per-planet **Discovery Score (0–100)** that a researcher can use to prioritize telescope time. The outputs are served through a REST API and explored in an interactive React dashboard with 3D star maps, spectral viewers, and ranked target lists.
-
-<br>
-
-<p align="center">
-  <code>docker-compose up -d</code> &nbsp;→&nbsp; <b>Full stack running in under 60 seconds</b>
-</p>
-
-<br>
-
----
+I built this to do all of that in one place. The platform pulls the full NASA archive, scores every planet for habitability and environmental risk, runs N-body simulations to predict where undiscovered planets should be, matches spectra against HITRAN molecular lines, flags statistical outliers, and rolls everything into a single 0–100 **Discovery Score**. There's a FastAPI backend, a React dashboard with a 3D star map, and the whole thing runs from `docker-compose up`.
 
 ## Table of Contents
 
