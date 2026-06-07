@@ -125,17 +125,27 @@ async def get_planet(planet_name: str, session: AsyncSession = Depends(get_db)):
 
     d = dict(row)
 
+    # Run sub-queries concurrently to solve the N+1 latency bottleneck
+    import asyncio
+    from .db import AsyncSessionLocal
+
+    async def fetch_all(query, params):
+        async with AsyncSessionLocal() as s:
+            return (await s.execute(query, params)).mappings().all()
+
+    a_rows, b_rows, specs, sys_planets_rows, sys_gaps_rows = await asyncio.gather(
+        fetch_all(q.PLANET_ANOMALIES, {"planet_name": planet_name}),
+        fetch_all(q.PLANET_BIOSIGS, {"planet_name": planet_name}),
+        fetch_all(q.SPECTRA_FOR_PLANET, {"planet_name": planet_name}),
+        fetch_all(q.SYSTEM_PLANETS, {"planet_name": planet_name}),
+        fetch_all(q.PLANET_GAPS, {"planet_name": planet_name, "pred_version": "3.1.0"})
+    )
+
     # Anomalies
-    a_rows = (await session.execute(
-        q.PLANET_ANOMALIES, {"planet_name": planet_name}
-    )).mappings().all()
     anomaly_count = len(a_rows)
     anomaly_types = [r["anomaly_type"] for r in a_rows]
 
     # Biosigs
-    b_rows = (await session.execute(
-        q.PLANET_BIOSIGS, {"planet_name": planet_name}
-    )).mappings().all()
     biosig_count = len(b_rows)
     molecules = [r["molecule"] for r in b_rows]
     max_sigma = max([r["detection_sigma"] for r in b_rows]) if b_rows else None
@@ -145,9 +155,6 @@ async def get_planet(planet_name: str, session: AsyncSession = Depends(get_db)):
     known_params = sum(1 for p in core_params if p is not None)
     data_completeness = (known_params / 5.0) * 100.0
 
-    specs = (await session.execute(
-        q.SPECTRA_FOR_PLANET, {"planet_name": planet_name}
-    )).mappings().all()
     has_spectra = len(specs) > 0
     
     inst_best = None
@@ -162,14 +169,6 @@ async def get_planet(planet_name: str, session: AsyncSession = Depends(get_db)):
             inst_best = specs[0].get("facility")
 
     # Fetch System Architecture
-    sys_planets_rows = (await session.execute(
-        q.SYSTEM_PLANETS, {"planet_name": planet_name}
-    )).mappings().all()
-    
-    sys_gaps_rows = (await session.execute(
-        q.PLANET_GAPS, {"planet_name": planet_name, "pred_version": "3.1.0"}
-    )).mappings().all()
-    
     from .models import SystemPlanetItem, OrbitalGapItem
     system_planets = [SystemPlanetItem(**dict(r)) for r in sys_planets_rows]
     orbital_gaps = [OrbitalGapItem(**dict(r)) for r in sys_gaps_rows]
@@ -203,40 +202,32 @@ async def get_planet(planet_name: str, session: AsyncSession = Depends(get_db)):
         tidal_lock_score=d.get("tidal_lock_score")
     )
 
-    # ── Compute Unified Discovery Score ──────────────────────────────────
-    # Weights: Habitability 40% | Biosignatures 25% | Data Quality 15% | Orbital 10% | Anomaly -10%
+    # ── Compute Unified Discovery Score Breakdown (matching SQL) ─────────
     from .models import ScoreBreakdown
 
-    # 1. Habitability component (0-40 pts)
+    # 1. Habitability component (SQL: COALESCE(hs.composite_score, 0) * 40)
     hab_raw = d.get("composite_score") or 0.0
     hab_component = round(hab_raw * 40, 2)
 
-    # 2. Biosignature component (0-25 pts)
-    #    Confirmed molecules worth 5pts each (max 25), boosted by sigma strength
+    # 2. Biosignature component (SQL: LEAST(count_sigma_gt_3 * 5.0, 25))
     confirmed_mols = sum(1 for r in b_rows if r.get("detection_sigma", 0) >= 3.0)
-    avg_sigma = (sum(r.get("detection_sigma", 0) for r in b_rows) / len(b_rows)) if b_rows else 0
-    sigma_factor = min(avg_sigma / 5.0, 1.0)  # normalize to 5σ max
-    biosig_component = round(min(confirmed_mols * 5.0 * (0.5 + 0.5 * sigma_factor), 25.0), 2)
+    biosig_component = min(confirmed_mols * 5.0, 25.0)
 
-    # 3. Data quality component (0-15 pts)
-    #    Spectra availability (5pts) + instrument tier (5pts) + completeness (5pts)
-    spectra_pts = 5.0 if has_spectra else 0.0
-    inst_pts = 5.0 if inst_best == "JWST" else (3.5 if inst_best in ("HST", "Hubble") else (2.0 if has_spectra else 0.0))
-    completeness_pts = (data_completeness / 100.0) * 5.0
-    data_component = round(min(spectra_pts + inst_pts + completeness_pts, 15.0), 2)
+    # 3. Data quality component (SQL: spectra existence + parameter count)
+    # Note: planet_parameters count is fetched as data_completeness count in SQL.
+    spectra_pts = 7.0 if has_spectra else 0.0
+    # SQL uses all populated planet_parameters. We approximate it with known_params in the Python layer for the breakdown.
+    data_component = spectra_pts + (known_params * 1.0)
 
-    # 4. Orbital context component (0-10 pts)
-    #    System richness (multi-planet = more scientifically interesting)
+    # 4. Orbital context component (SQL: sibling count * 1.5)
     n_siblings = len(sys_planets_rows)
-    n_gaps = len(sys_gaps_rows)
-    orbital_component = round(min(n_siblings * 1.5 + n_gaps * 2.0, 10.0), 2)
+    orbital_component = min(n_siblings * 1.5, 10.0)
 
-    # 5. Anomaly penalty (0 to -10 pts)
-    #    Each anomaly deducts points, capped at -10
-    anomaly_penalty = round(-min(anomaly_count * 3.0, 10.0), 2)
+    # 5. Anomaly penalty (SQL: min(anomaly_count * 3.0, 10))
+    anomaly_penalty = -min(anomaly_count * 3.0, 10.0)
 
-    raw_score = hab_component + biosig_component + data_component + orbital_component + anomaly_penalty
-    discovery_score = round(max(0.0, min(raw_score, 100.0)), 1)
+    # Use the EXACT score computed by the DB for consistency
+    discovery_score = float(d.get("discovery_score") or 0.0)
 
     score_breakdown = ScoreBreakdown(
         habitability=hab_component,

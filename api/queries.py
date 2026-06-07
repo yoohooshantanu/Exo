@@ -1,7 +1,17 @@
 """SQL queries for the API."""
 from sqlalchemy import text
 
-PLANET_LIST = text("""
+DISCOVERY_SCORE_SQL = """ROUND((
+    COALESCE(hs.composite_score, 0) * 40
+    + LEAST((SELECT COUNT(*) FROM molecule_detections md WHERE md.planet_id = p.planet_id AND md.detection_sigma >= 3) * 5.0, 25)
+    + CASE WHEN EXISTS(SELECT 1 FROM atmospheric_spectra asp WHERE asp.planet_id = p.planet_id) THEN 7 ELSE 0 END
+    + (SELECT COUNT(*) FROM planet_parameters pp2 WHERE pp2.planet_id = p.planet_id AND pp2.is_default = true AND pp2.value IS NOT NULL) * 1.0
+    + LEAST((SELECT COUNT(*) FROM planets p2 WHERE p2.star_id = p.star_id AND p2.status = 'confirmed') * 1.5, 10)
+    - LEAST((SELECT COUNT(*) FROM anomaly_flags af WHERE af.planet_id = p.planet_id) * 3.0, 10)
+)::numeric, 1)"""
+
+
+PLANET_LIST = text(f"""
 SELECT
     p.planet_name,
     s.hip_name AS hostname,
@@ -15,14 +25,7 @@ SELECT
     hs.composite_score,
     hs.hz_score,
     tc.cluster_name,
-    ROUND((
-        COALESCE(hs.composite_score, 0) * 40
-        + LEAST((SELECT COUNT(*) FROM molecule_detections md WHERE md.planet_id = p.planet_id AND md.detection_sigma >= 3) * 5.0, 25)
-        + CASE WHEN EXISTS(SELECT 1 FROM atmospheric_spectra asp WHERE asp.planet_id = p.planet_id) THEN 7 ELSE 0 END
-        + (SELECT COUNT(*) FROM planet_parameters pp2 WHERE pp2.planet_id = p.planet_id AND pp2.is_default = true AND pp2.value IS NOT NULL) * 1.0
-        + LEAST((SELECT COUNT(*) FROM planets p2 WHERE p2.star_id = p.star_id AND p2.status = 'confirmed') * 1.5, 10)
-        - LEAST((SELECT COUNT(*) FROM anomaly_flags af WHERE af.planet_id = p.planet_id) * 3.0, 10)
-    )::numeric, 1) AS discovery_score
+    {DISCOVERY_SCORE_SQL} AS discovery_score
 FROM planets p
 JOIN stars s ON p.star_id = s.star_id
 LEFT JOIN planet_parameters pp
@@ -59,7 +62,7 @@ WHERE (CAST(:method AS VARCHAR) IS NULL OR p.discovery_method = CAST(:method AS 
   AND p.status = 'confirmed'
 """)
 
-PLANET_DETAIL = text("""
+PLANET_DETAIL = text(f"""
 SELECT
     p.planet_name,
     p.planet_id::text,
@@ -104,7 +107,8 @@ SELECT
     ) AS risk_score,
     tc.cluster_label,
     tc.cluster_name,
-    tc.distance_to_centroid
+    tc.distance_to_centroid,
+    {DISCOVERY_SCORE_SQL} AS discovery_score
 FROM planets p
 JOIN stars s ON p.star_id = s.star_id
 LEFT JOIN planet_parameters pp
@@ -225,18 +229,11 @@ WHERE p.planet_name = :planet_name
 ORDER BY h.intensity DESC LIMIT 500
 """)
 
-RANKINGS_TOP_HABITABLE = text("""
+RANKINGS_TOP_HABITABLE = text(f"""
 SELECT
     p.planet_name,
     s.hip_name AS hostname,
-    ROUND((
-        COALESCE(hs.composite_score, 0) * 40
-        + LEAST((SELECT COUNT(*) FROM molecule_detections md WHERE md.planet_id = p.planet_id AND md.detection_sigma >= 3) * 5.0, 25)
-        + CASE WHEN EXISTS(SELECT 1 FROM atmospheric_spectra asp WHERE asp.planet_id = p.planet_id) THEN 7 ELSE 0 END
-        + (SELECT COUNT(*) FROM planet_parameters pp2 WHERE pp2.planet_id = p.planet_id AND pp2.is_default = true AND pp2.value IS NOT NULL) * 1.0
-        + LEAST((SELECT COUNT(*) FROM planets p2 WHERE p2.star_id = p.star_id AND p2.status = 'confirmed') * 1.5, 10)
-        - LEAST((SELECT COUNT(*) FROM anomaly_flags af WHERE af.planet_id = p.planet_id) * 3.0, 10)
-    )::numeric, 1) AS discovery_score,
+    {DISCOVERY_SCORE_SQL} AS discovery_score,
     'Top Discovery' AS category,
     tc.cluster_name AS detail
 FROM habitability_scores hs
@@ -251,18 +248,11 @@ ORDER BY discovery_score DESC
 LIMIT :limit
 """)
 
-RANKINGS_ANOMALOUS = text("""
+RANKINGS_ANOMALOUS = text(f"""
 SELECT
     p.planet_name,
     s.hip_name AS hostname,
-    ROUND((
-        COALESCE(hs.composite_score, 0) * 40
-        + LEAST((SELECT COUNT(*) FROM molecule_detections md WHERE md.planet_id = p.planet_id AND md.detection_sigma >= 3) * 5.0, 25)
-        + CASE WHEN EXISTS(SELECT 1 FROM atmospheric_spectra asp WHERE asp.planet_id = p.planet_id) THEN 7 ELSE 0 END
-        + (SELECT COUNT(*) FROM planet_parameters pp2 WHERE pp2.planet_id = p.planet_id AND pp2.is_default = true AND pp2.value IS NOT NULL) * 1.0
-        + LEAST((SELECT COUNT(*) FROM planets p2 WHERE p2.star_id = p.star_id AND p2.status = 'confirmed') * 1.5, 10)
-        - LEAST((SELECT COUNT(*) FROM anomaly_flags af WHERE af.planet_id = p.planet_id) * 3.0, 10)
-    )::numeric, 1) AS discovery_score,
+    {DISCOVERY_SCORE_SQL} AS discovery_score,
     'Anomalous' AS category,
     af.anomaly_type AS detail
 FROM anomaly_flags af
@@ -275,18 +265,11 @@ ORDER BY discovery_score DESC, af.deviation_sigma DESC
 LIMIT :limit
 """)
 
-RANKINGS_NOVEL = text("""
+RANKINGS_NOVEL = text(f"""
 SELECT
     p.planet_name,
     s.hip_name AS hostname,
-    ROUND((
-        COALESCE(hs.composite_score, 0) * 40
-        + LEAST((SELECT COUNT(*) FROM molecule_detections md WHERE md.planet_id = p.planet_id AND md.detection_sigma >= 3) * 5.0, 25)
-        + CASE WHEN EXISTS(SELECT 1 FROM atmospheric_spectra asp WHERE asp.planet_id = p.planet_id) THEN 7 ELSE 0 END
-        + (SELECT COUNT(*) FROM planet_parameters pp2 WHERE pp2.planet_id = p.planet_id AND pp2.is_default = true AND pp2.value IS NOT NULL) * 1.0
-        + LEAST((SELECT COUNT(*) FROM planets p2 WHERE p2.star_id = p.star_id AND p2.status = 'confirmed') * 1.5, 10)
-        - LEAST((SELECT COUNT(*) FROM anomaly_flags af WHERE af.planet_id = p.planet_id) * 3.0, 10)
-    )::numeric, 1) AS discovery_score,
+    {DISCOVERY_SCORE_SQL} AS discovery_score,
     'Novel Taxonomy' AS category,
     tc.cluster_name AS detail
 FROM (
@@ -307,7 +290,7 @@ ORDER BY discovery_score DESC NULLS LAST
 LIMIT :limit
 """)
 
-RANKINGS_BIOSIGNATURES = text("""
+RANKINGS_BIOSIGNATURES = text(f"""
 SELECT
     p.planet_name,
     s.hip_name AS hostname,
@@ -332,7 +315,7 @@ ORDER BY MAX(md.detection_sigma) DESC
 LIMIT :limit
 """)
 
-RANKINGS_GAPS = text("""
+RANKINGS_GAPS = text(f"""
 SELECT
     p2.planet_name,
     s.hip_name AS hostname,
@@ -477,18 +460,11 @@ LIMIT :limit
 
 # ── Priority Target (Dashboard Hero) ────────────────────────────────────────
 
-PRIORITY_TARGET = text("""
+PRIORITY_TARGET = text(f"""
 SELECT
     p.planet_name,
     s.hip_name AS hostname,
-    ROUND((
-        COALESCE(hs.composite_score, 0) * 40
-        + LEAST((SELECT COUNT(*) FROM molecule_detections md WHERE md.planet_id = p.planet_id AND md.detection_sigma >= 3) * 5.0, 25)
-        + CASE WHEN EXISTS(SELECT 1 FROM atmospheric_spectra asp WHERE asp.planet_id = p.planet_id) THEN 7 ELSE 0 END
-        + (SELECT COUNT(*) FROM planet_parameters pp2 WHERE pp2.planet_id = p.planet_id AND pp2.is_default = true AND pp2.value IS NOT NULL) * 1.0
-        + LEAST((SELECT COUNT(*) FROM planets p2 WHERE p2.star_id = p.star_id AND p2.status = 'confirmed') * 1.5, 10)
-        - LEAST((SELECT COUNT(*) FROM anomaly_flags af WHERE af.planet_id = p.planet_id) * 3.0, 10)
-    )::numeric, 1) AS discovery_score,
+    {DISCOVERY_SCORE_SQL} AS discovery_score,
     hs.hz_score,
     tc.cluster_name,
     MAX(CASE WHEN pp.param_name = 'radius_earth' THEN pp.value END) AS radius_earth,
