@@ -1,13 +1,12 @@
 import { Outlet, useLocation, Link } from 'react-router-dom'
-import { Orbit, Globe, Map, Telescope, BarChart3, AlertTriangle, ShieldCheck } from 'lucide-react'
-import { CosmicStarfield } from '@/components/CosmicStarfield'
+import { Orbit, Compass, Telescope, BarChart3, Bell, ShieldCheck } from 'lucide-react'
 
 const navItems = [
-  { to: '/', label: 'Dashboard', icon: Globe },
-  { to: '/stars', label: 'Star Map', icon: Map },
+  { to: '/', label: 'Overview', icon: Compass },
   { to: '/planets', label: 'Catalog', icon: Telescope },
+  { to: '/stars', label: 'Star Map', icon: Orbit },
   { to: '/rankings', label: 'Rankings', icon: BarChart3 },
-  { to: '/alerts', label: 'Alerts', icon: AlertTriangle },
+  { to: '/alerts', label: 'Alerts', icon: Bell },
   { to: '/validation', label: 'Validation', icon: ShieldCheck },
 ]
 
@@ -16,51 +15,66 @@ export default function Layout() {
   const isStarMap = pathname === '/stars'
 
   return (
-    <div className="relative flex min-h-screen flex-col max-w-7xl mx-auto w-full">
-      {/* Dynamic Cosmic Starfield Background */}
-      <CosmicStarfield />
+    <div className="min-h-screen bg-[#07070a] text-zinc-200 antialiased selection:bg-zinc-800 selection:text-white flex flex-col font-sans">
+      {/* Modern High-Precision Top Header */}
+      <header className="sticky top-0 z-50 h-13 border-b border-zinc-800/80 bg-[#07070a]/90 backdrop-blur-xl px-4 sm:px-6">
+        <div className="max-w-7xl mx-auto h-full flex items-center justify-between gap-6">
+          {/* Logo / Brand */}
+          <Link to="/" className="flex items-center gap-3 shrink-0 group">
+            <div className="size-6 rounded-md bg-zinc-900 border border-zinc-700/80 flex items-center justify-center text-zinc-300 transition-colors group-hover:border-zinc-500 group-hover:text-white">
+              <span className="text-[11px] font-mono font-semibold tracking-tighter">Ex</span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="font-medium text-sm text-zinc-100 tracking-tight">ExoDiscovery</span>
+              <span className="hidden sm:inline-block font-mono text-[10px] text-zinc-500 uppercase tracking-widest border border-zinc-800 px-1.5 py-0.5 rounded">
+                v5.0
+              </span>
+            </div>
+          </Link>
 
-      {/* Top navbar */}
-      <header className="sticky top-0 z-50 flex h-14 items-center border-b border-white/10 bg-background/80 backdrop-blur-md px-4 gap-6">
-        {/* Brand */}
-        <Link to="/" className="flex items-center gap-2.5 shrink-0 group">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-gradient-to-tr from-cyan-500 to-purple-600 text-white shadow-[0_0_15px_rgba(6,182,212,0.4)] transition-transform group-hover:scale-110">
-            <Orbit className="size-4 animate-spin [animation-duration:12s]" />
-          </div>
-          <span className="font-bold text-sm tracking-wide bg-gradient-to-r from-white via-zinc-200 to-cyan-300 bg-clip-text text-transparent hidden sm:inline">
-            ExoDiscovery
-          </span>
-        </Link>
-
-        {/* Nav links */}
-        <nav className="flex items-center gap-1.5">
-          {navItems.map((item) => {
-            const active = pathname === item.to ||
-              (item.to !== '/' && pathname.startsWith(item.to))
-            return (
-              <Link
-                key={item.to}
-                to={item.to}
-                className={`relative flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 ${active
-                    ? 'bg-white/10 text-cyan-300 shadow-sm border border-cyan-500/20'
-                    : 'text-zinc-400 hover:text-white hover:bg-white/5'
+          {/* Minimal Clean Navigation */}
+          <nav className="flex items-center gap-1 sm:gap-1.5">
+            {navItems.map((item) => {
+              const active = pathname === item.to || (item.to !== '/' && pathname.startsWith(item.to))
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs font-medium transition-all ${
+                    active
+                      ? 'bg-zinc-800/80 text-white shadow-sm'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60'
                   }`}
-              >
-                <item.icon className="size-4" />
-                <span className="hidden md:inline">{item.label}</span>
-                {active && (
-                  <span className="absolute bottom-0 left-2 right-2 h-[2px] bg-cyan-400 rounded-full shadow-[0_0_8px_#38bdf8]" />
-                )}
-              </Link>
-            )
-          })}
-        </nav>
+                >
+                  <item.icon className="size-3.5" />
+                  <span className="hidden md:inline">{item.label}</span>
+                </Link>
+              )
+            })}
+          </nav>
+
+          {/* Status Indicator */}
+          <div className="hidden lg:flex items-center gap-2 text-xs font-mono text-zinc-400">
+            <span className="size-1.5 rounded-full bg-emerald-500" />
+            <span className="text-[11px]">NASA Archive Synced</span>
+          </div>
+        </div>
       </header>
 
-      {/* Page content */}
-      <main className={`relative z-10 ${isStarMap ? 'flex-1' : 'flex-1 p-4 md:p-6'}`}>
+      {/* Page Content */}
+      <main className={`flex-1 ${isStarMap ? 'w-full' : 'max-w-7xl mx-auto w-full px-4 sm:px-6 py-6'}`}>
         <Outlet />
       </main>
+
+      {/* Minimal Footer */}
+      {!isStarMap && (
+        <footer className="border-t border-zinc-800/60 py-5 px-6 text-center text-xs text-zinc-400 font-mono">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
+            <span>Autonomous Exoplanet Screening &amp; Decision Layer</span>
+            <span>6,467 Confirmed Systems &bull; JWST Cycle 1–3 Allocations</span>
+          </div>
+        </footer>
+      )}
     </div>
   )
 }
