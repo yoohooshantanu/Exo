@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import {
-  Radar, RadarChart, PolarGrid, PolarAngleAxis,
+  Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   AreaChart, Area, XAxis, YAxis,
   ReferenceLine, CartesianGrid,
   BarChart, Bar
@@ -65,14 +65,15 @@ export default function PlanetDetail() {
 
   const radarData = useMemo(() => {
     if (!planet) return []
+    const round3 = (v?: number | null) => (v != null && v > 0 ? Number(v.toFixed(3)) : 0)
     return [
-      { axis: 'Radius', value: planet.habitability.radius_esi_score ?? 0 },
-      { axis: 'Mass', value: planet.habitability.mass_esi_score ?? 0 },
-      { axis: 'Temp', value: planet.habitability.teq_score ?? 0 },
-      { axis: 'HZ', value: planet.habitability.hz_score ?? 0 },
-      { axis: 'Tidal', value: planet.anomaly_risk.tidal_lock_score ?? 0 },
-      { axis: 'XUV Escape', value: planet.anomaly_risk.xuv_escape_score ?? 0 },
-      { axis: 'Ecc', value: planet.habitability.eccentricity_score ?? 0 },
+      { axis: 'Radius', value: round3(planet.habitability.radius_esi_score) },
+      { axis: 'Mass', value: round3(planet.habitability.mass_esi_score) },
+      { axis: 'Temp', value: round3(planet.habitability.teq_score) },
+      { axis: 'HZ', value: round3(planet.habitability.hz_score) },
+      { axis: 'Tidal', value: round3(planet.anomaly_risk.tidal_lock_score) },
+      { axis: 'XUV Escape', value: round3(planet.anomaly_risk.xuv_escape_score) },
+      { axis: 'Ecc', value: round3(planet.habitability.eccentricity_score) },
     ].filter(d => d.value > 0)
   }, [planet])
 
@@ -294,10 +295,11 @@ export default function PlanetDetail() {
             {radarData.length > 0 ? (
               <ChartContainer config={radarConfig} className="mx-auto aspect-square max-h-[280px]">
                 <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="70%">
-                  <PolarGrid />
-                  <PolarAngleAxis dataKey="axis" tick={{ fontSize: 11 }} />
+                  <PolarGrid stroke="hsl(var(--muted-foreground)/0.2)" />
+                  <PolarAngleAxis dataKey="axis" tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
+                  <PolarRadiusAxis domain={[0, 1]} angle={90} tickCount={6} tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground)/0.7)' }} stroke="hsl(var(--muted-foreground)/0.2)" />
                   <ChartTooltip content={<ChartTooltipContent />} />
-                  <Radar dataKey="value" fill="var(--chart-1)" fillOpacity={0.15} stroke="var(--chart-1)" strokeWidth={1.5} />
+                  <Radar dataKey="value" fill="var(--chart-1)" fillOpacity={0.25} stroke="var(--chart-1)" strokeWidth={1.5} />
                 </RadarChart>
               </ChartContainer>
             ) : (

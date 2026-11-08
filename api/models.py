@@ -125,6 +125,9 @@ class PlanetProfileVector(BaseModel):
 
     # Unified Discovery Score (all modules combined)
     discovery_score: float = 0.0
+    observability_index: Optional[float] = None
+    physical_triage_index: Optional[float] = None
+    characterization_index: Optional[float] = None
     score_breakdown: ScoreBreakdown = ScoreBreakdown()
 
     # The 4 Core Vectors
