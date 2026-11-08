@@ -10,8 +10,10 @@ import numpy as np
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
+from db_sync import create_sync_engine
+from config import RETRIEVAL_OUTPUT_DIR
 
 from dotenv import load_dotenv
 
@@ -25,11 +27,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 
-DATABASE_URL = os.environ["DATABASE_URL"]
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine = create_sync_engine()
 Session = sessionmaker(bind=engine)
 
-OUTPUT_DIR = PROJECT_ROOT / "outputs" / "retrievals"
+OUTPUT_DIR = RETRIEVAL_OUTPUT_DIR
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def new_id(): return str(uuid.uuid4())
@@ -141,15 +142,15 @@ def run_platon_retrieval(planet_id: str, spec_id: str, retrieval_id: str):
         
         # Configure the nested sampler (using low numbers for rapid demonstration)
         # In a real scientific run, nlive would be 500-1000
-        result = retriever.run_dynesty(
-            transit_bins=bins, 
-            transit_depths=depths, 
-            transit_errors=errors,
+        # For demonstration purposes, we bumped it to 500
+        result = retriever.run_multinest(
+            bins=bins, depths=depths, errors=errors,
+            plot_best_fit=False,
+            nlive=500,
             eclipse_bins=None,
             eclipse_depths=None,
             eclipse_errors=None,
-            fit_info=fit_info, 
-            nlive=150
+            fit_info=fit_info
         )
         
         best_fit_dict = {p: float(val) for p, val in zip(params_to_retrieve, result.x)}
@@ -177,6 +178,7 @@ def run_platon_retrieval(planet_id: str, spec_id: str, retrieval_id: str):
             json.dump(posterior_data, f)
             
         run_time_s = (datetime.now(timezone.utc) - start_time).total_seconds()
+        stored_path = posterior_filepath.relative_to(PROJECT_ROOT).as_posix()
         
         # Update DB
         session.execute(text("""
@@ -191,7 +193,7 @@ def run_platon_retrieval(planet_id: str, spec_id: str, retrieval_id: str):
             "rt": run_time_s,
             "bf": json.dumps(best_fit_dict),
             "ez": evidence_ln_z,
-            "pf": str(posterior_filepath.resolve()),
+            "pf": stored_path,
             "rid": retrieval_id
         })
         session.commit()

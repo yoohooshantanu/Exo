@@ -9,6 +9,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from '@/components/ui/table'
 import PlanetDetailPanel from '@/components/PlanetDetailPanel'
+import { ErrorCard } from '@/components/ErrorCard'
 
 const categories = [
   { key: 'habitable', label: 'Top Habitable' },
@@ -20,7 +21,7 @@ const categories = [
 export default function Rankings() {
   const [active, setActive] = useState('habitable')
   const [selectedPlanet, setSelectedPlanet] = useState<string | null>(null)
-  const { data: rankings, isLoading } = useRankings(active, 50)
+  const { data: rankings, isLoading, isError, refetch } = useRankings(active, 50)
 
   return (
     <>
@@ -42,6 +43,12 @@ export default function Rankings() {
           ))}
         </div>
 
+        {isError && (
+          <div className="py-8">
+            <ErrorCard message="Failed to load rankings." onRetry={refetch} />
+          </div>
+        )}
+
         {/* Table — no Card wrapper, directly on page like reference */}
         <Table>
           <TableHeader>
@@ -50,7 +57,9 @@ export default function Rankings() {
               <TableHead>Planet</TableHead>
               <TableHead>Host Star</TableHead>
               <TableHead>Classification</TableHead>
-              <TableHead className="text-right">D-Score</TableHead>
+              <TableHead className="text-right">
+                {active === 'habitable' ? 'Physical Triage' : active === 'biosignatures' ? 'Characterization' : 'Observability'}
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -89,7 +98,11 @@ export default function Rankings() {
                   ) : '—'}
                 </TableCell>
                 <TableCell className="text-right font-data text-chart-1">
-                  {item.discovery_score != null ? item.discovery_score.toFixed(1) : '—'}
+                  {active === 'habitable'
+                    ? (item.physical_triage_index != null ? item.physical_triage_index.toFixed(1) : '—')
+                    : active === 'biosignatures'
+                    ? (item.characterization_index != null ? item.characterization_index.toFixed(1) : '—')
+                    : (item.observability_index != null ? item.observability_index.toFixed(1) : '—')}
                 </TableCell>
               </TableRow>
             ))}

@@ -81,14 +81,18 @@ export default function StarMap() {
   useEffect(() => {
     if (!systemData || !rendererRef.current) return
 
-    // Dispose old system scene if exists
     if (systemRef.current) {
       systemRef.current.controls.dispose()
       systemRef.current.scene.traverse(obj => {
-        if (obj instanceof THREE.Mesh) {
-          obj.geometry.dispose()
-          if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose())
-          else obj.material.dispose()
+        if (obj instanceof THREE.Mesh || obj instanceof THREE.Line || obj instanceof THREE.Sprite || obj instanceof THREE.Points) {
+          obj.geometry?.dispose()
+          const mat = (obj as any).material
+          const disposeMat = (m: any) => {
+            m?.map?.dispose()
+            m?.dispose()
+          }
+          if (Array.isArray(mat)) mat.forEach(disposeMat)
+          else disposeMat(mat)
         }
       })
     }
@@ -146,7 +150,6 @@ export default function StarMap() {
     const teff = systemData.teff || 5778
     const rgb = teffToRGB(teff)
     const starColor = new THREE.Color(rgb[0], rgb[1], rgb[2])
-    console.log(`Star teff=${teff} → rgb(${Math.round(rgb[0]*255)},${Math.round(rgb[1]*255)},${Math.round(rgb[2]*255)})`)
 
     // ── SCALING FIX: Star radius ──
     const starSceneRadius = (systemData.radius_solar ?? 1.0) * STAR_SCALE
@@ -204,8 +207,8 @@ export default function StarMap() {
     // ── Habitable zone ring ──
     const lum = systemData.radius_solar
       ? Math.pow(systemData.radius_solar, 2) * Math.pow(teff / 5778, 4) : 1
-    const hzInnerAU = Math.sqrt(lum / 1.1)
-    const hzOuterAU = Math.sqrt(lum / 0.53)
+    const hzInnerAU = 0.99 * Math.sqrt(lum)
+    const hzOuterAU = 1.70 * Math.sqrt(lum)
     const hzInner = Math.max(starSceneRadius * 3, Math.pow(hzInnerAU, 0.5) * 15)
     const hzOuter = Math.max(starSceneRadius * 3, Math.pow(hzOuterAU, 0.5) * 15)
     const hzGeo = new THREE.RingGeometry(hzInner, hzOuter, 128)
@@ -253,7 +256,6 @@ export default function StarMap() {
       let planetSceneRadius = (p.radius_earth || 1.0) / 109.0 * STAR_SCALE
       planetSceneRadius = Math.max(planetSceneRadius, starSceneRadius * 0.04) // min visible
       planetSceneRadius = Math.min(planetSceneRadius, starSceneRadius * 1.5)  // safety clamp
-      console.log(`${p.planet_name}: r_earth=${p.radius_earth}, scene_r=${planetSceneRadius.toFixed(4)}, star_r=${starSceneRadius.toFixed(4)}`)
 
       const isRocky = (p.radius_earth || 1) < 2
       let pColor: number
@@ -464,9 +466,26 @@ export default function StarMap() {
       renderer.domElement.removeEventListener('pointermove', onPointerMove)
       cancelAnimationFrame(frameRef.current)
       controls.dispose()
+      
+      // Dispose ALL scenes
+      ;[scene, systemRef.current].forEach(s => {
+        if (!s) return
+        const s_scene = 'scene' in s ? s.scene : s
+        s_scene.traverse(obj => {
+          if (obj instanceof THREE.Mesh || obj instanceof THREE.Line || obj instanceof THREE.Sprite || obj instanceof THREE.Points) {
+            obj.geometry?.dispose()
+            const mat = (obj as any).material
+            const disposeMat = (m: any) => {
+              m?.map?.dispose()
+              m?.dispose()
+            }
+            if (Array.isArray(mat)) mat.forEach(disposeMat)
+            else disposeMat(mat)
+          }
+        })
+      })
+      
       renderer.dispose()
-      starGeo.dispose()
-      starMat.dispose()
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement)
     }
   }, [data])

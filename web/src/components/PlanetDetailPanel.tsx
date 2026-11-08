@@ -29,7 +29,7 @@ export default function PlanetDetailPanel({ name }: { name: string }) {
       { axis: 'Temp', value: planet.habitability.teq_score ?? 0 },
       { axis: 'HZ', value: planet.habitability.hz_score ?? 0 },
       { axis: 'Tidal', value: planet.anomaly_risk.tidal_lock_score ?? 0 },
-      { axis: 'Flare', value: planet.anomaly_risk.flare_score ?? 0 },
+      { axis: 'XUV Escape', value: planet.anomaly_risk.xuv_escape_score ?? 0 },
     ].filter(d => d.value > 0)
   }, [planet])
 

@@ -24,6 +24,8 @@ config = context.config
 # Override sqlalchemy.url from the DATABASE_URL env var (loaded by dotenv above)
 database_url = os.getenv("DATABASE_URL")
 if database_url:
+    from modules.db_url import normalize_sync_database_url
+    database_url = normalize_sync_database_url(database_url)
     # Escape '%' for configparser interpolation
     config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 

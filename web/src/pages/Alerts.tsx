@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/table'
 import { AlertTriangle } from 'lucide-react'
 import { formatAlertReason } from '@/lib/utils'
+import { ErrorCard } from '@/components/ErrorCard'
 
 function ts(dateStr?: string): string {
   if (!dateStr) return '—'
@@ -16,7 +17,7 @@ function ts(dateStr?: string): string {
 }
 
 export default function Alerts() {
-  const { data: alerts, isLoading } = useAlerts(100)
+  const { data: alerts, isLoading, isError, refetch } = useAlerts(100)
 
   return (
     <div className="space-y-6">
@@ -32,6 +33,10 @@ export default function Alerts() {
           </span>
         </div>
       </div>
+
+      {isError && (
+        <ErrorCard message="Failed to load alerts feed." onRetry={refetch} />
+      )}
 
       <Card>
         <CardHeader>

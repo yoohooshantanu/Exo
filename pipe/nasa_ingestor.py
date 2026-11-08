@@ -3,15 +3,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 import math
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "modules"))
 load_dotenv(PROJECT_ROOT / ".env")
 
-DATABASE_URL = os.environ["DATABASE_URL"]
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+from db_sync import create_sync_engine
+
+engine = create_sync_engine()
 SessionLocal = sessionmaker(bind=engine)
 
 def new_id(): return str(uuid.uuid4())

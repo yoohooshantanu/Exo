@@ -3,19 +3,16 @@ import os
 from typing import AsyncGenerator
 
 from dotenv import load_dotenv
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
+
+from modules.db_url import normalize_async_database_url
 
 load_dotenv()
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql+asyncpg://exo:exopass@db:5432/exoplanets"
+DATABASE_URL = normalize_async_database_url(
+    os.environ.get("DATABASE_URL", "postgresql://exo:exopass@db:5432/exoplanets")
 )
-
-# Convert sync URL to async if needed
-if DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
 engine = create_async_engine(
     DATABASE_URL,

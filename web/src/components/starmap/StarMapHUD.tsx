@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { T } from '@/lib/starmap-helpers'
 
 interface Props {
   starCount: number | undefined
@@ -9,7 +8,6 @@ interface Props {
 
 export default function StarMapHUD({ starCount, canvasReady }: Props) {
   const [is3D] = useState(true)
-  const mono = 'var(--exo-font-mono)'
 
   return (
     <>
@@ -18,13 +16,7 @@ export default function StarMapHUD({ starCount, canvasReady }: Props) {
         initial={{ opacity: 1 }}
         animate={{ opacity: canvasReady ? 0 : 1 }}
         transition={{ duration: 1.5, ease: 'easeOut' }}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          background: T.void,
-          zIndex: 20,
-          pointerEvents: 'none',
-        }}
+        className="fixed inset-0 bg-[#06080a] z-20 pointer-events-none"
       />
 
       {/* Top-right: star count + 3D toggle */}
@@ -32,48 +24,27 @@ export default function StarMapHUD({ starCount, canvasReady }: Props) {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 1.6, duration: 0.4 }}
-        style={{
-          position: 'fixed',
-          top: 68,
-          right: 24,
-          zIndex: 30,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-        }}
+        className="fixed top-[68px] right-6 z-30 flex items-center gap-3"
       >
-        <span style={{ fontFamily: mono, fontSize: 12, color: T.text2 }}>
+        <span className="font-mono text-xs text-muted-foreground">
           {starCount?.toLocaleString() ?? '—'} stars
         </span>
-        <span style={{ color: T.text3, fontSize: 11 }}>·</span>
-        <span style={{
-          fontFamily: mono,
-          fontSize: 11,
-          color: is3D ? T.accent : T.text3,
-          letterSpacing: '0.06em',
-          cursor: 'default',
-        }}>
+        <span className="text-[11px] text-muted-foreground/50">&middot;</span>
+        <span className={`font-mono text-[11px] tracking-widest cursor-default ${is3D ? 'text-primary' : 'text-muted-foreground'}`}>
           3D VIEW
         </span>
       </motion.div>
 
       {/* Sweep loading line — visible until canvas ready */}
       {!canvasReady && (
-        <div style={{
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          height: 1,
-          zIndex: 25,
-          overflow: 'hidden',
-        }}>
-          <div style={{
-            width: '100%',
-            height: '100%',
-            background: `linear-gradient(90deg, transparent, ${T.borderHi}, transparent)`,
-            animation: 'sweep 1.5s linear infinite',
-          }} />
+        <div className="fixed bottom-0 left-0 right-0 h-px z-25 overflow-hidden">
+          <div 
+            className="w-full h-full" 
+            style={{
+              background: 'linear-gradient(90deg, transparent, hsl(var(--border)), transparent)',
+              animation: 'sweep 1.5s linear infinite',
+            }} 
+          />
           <style>{`
             @keyframes sweep {
               0% { transform: translateX(-100%); }

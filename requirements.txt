@@ -33,7 +33,7 @@ httpx>=0.27.0
 
 # Utilities
 python-dotenv>=1.0.0
- pydantic>=2.6.0
+pydantic>=2.6.0
 pydantic-settings>=2.1.0
 
 # Pipeline Orchestration
@@ -47,6 +47,13 @@ matplotlib>=3.8.0
 
 # HITRAN
 hitran-api>=1.0.0
+
+# Rate Limiting & Tooling
+slowapi>=0.1.9
+ruff>=0.8.0
+
+# Testing
+pytest>=8.0.0
 
 # Jupyter / Analysis (optional)
 jupyter>=1.0.0

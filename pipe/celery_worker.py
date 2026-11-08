@@ -24,7 +24,9 @@ app.conf.update(
     worker_concurrency=2, # Limit concurrency since retrievals are CPU heavy
 )
 
-@app.task(name="run_platon_retrieval_task", bind=True)
+RETRIEVAL_TIMEOUT_SECONDS = 3600  # 1 hour max
+
+@app.task(name="run_platon_retrieval_task", bind=True, time_limit=RETRIEVAL_TIMEOUT_SECONDS)
 def run_platon_retrieval_task(self, planet_id: str, spec_id: str, retrieval_id: str):
     from platon_retrieval import run_platon_retrieval
     # We pass the retrieval_id so the DB can be updated properly

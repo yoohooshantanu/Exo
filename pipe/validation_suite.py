@@ -18,15 +18,21 @@ Or called from other pipelines:
 """
 
 import os
+import sys
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
+from pathlib import Path
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
-load_dotenv()
-DATABASE_URL = os.environ["DATABASE_URL"]
-engine       = create_engine(DATABASE_URL, pool_pre_ping=True)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "modules"))
+load_dotenv(PROJECT_ROOT / ".env")
+
+from db_sync import create_sync_engine
+
+engine       = create_sync_engine()
 Session      = sessionmaker(bind=engine)
 
 
@@ -335,7 +341,7 @@ def check_ingestion_run_completed(session) -> CheckResult:
     return CheckResult(
         name    = "Latest ingestion run status",
         level   = "WARNING",
-        passed  = status in ("success", "partial"),
+        passed  = status == "completed",
         message = f"Latest run status: {status}",
     )
 

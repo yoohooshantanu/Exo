@@ -21,22 +21,19 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text, insert
+from sqlalchemy import text, insert
 from sqlalchemy.orm import sessionmaker
+from db_sync import create_sync_engine
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 from db.models import TaxonomyCluster
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-DATABASE_URL  = os.environ["DATABASE_URL"]
-MODEL_VERSION = "1.0.0"
+from config import TAXONOMY_MODEL_VERSION as MODEL_VERSION
 
-engine  = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine  = create_sync_engine()
 Session = sessionmaker(bind=engine)
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
@@ -120,70 +117,76 @@ def fetch_planet_data(session):
 def impute_per_discovery_method(df):
     """
     Median imputation per discovery_method group.
-    Different methods have very different selection biases, so we impute
-    within groups to avoid mixing populations.
+    Returns (imputed_df, n_imputed_per_row).
     """
     df_imp = df.copy()
+    n_imputed = pd.Series(0, index=df_imp.index, dtype=int)
 
-    for method, group in df_imp.groupby("discovery_method"):
+    for _method, group in df_imp.groupby("discovery_method"):
         for feat in FEATURES:
             mask = group[feat].isna()
             if mask.any():
                 median_val = group[feat].median()
                 if pd.notna(median_val):
-                    df_imp.loc[mask.index[mask], feat] = median_val
+                    idx = mask.index[mask]
+                    df_imp.loc[idx, feat] = median_val
+                    n_imputed.loc[idx] += 1
 
-    # Global fallback for any remaining NaNs (small discovery method groups)
     for feat in FEATURES:
         mask = df_imp[feat].isna()
         if mask.any():
             global_median = df_imp[feat].median()
             if pd.notna(global_median):
                 df_imp.loc[mask, feat] = global_median
+                n_imputed.loc[mask] += 1
 
-    return df_imp
+    return df_imp, n_imputed
 
 
 # ── Clustering pipeline ─────────────────────────────────────────────────────
+
+MAX_IMPUTED_FOR_CLUSTERING = 2  # exclude heavily imputed rows from HDBSCAN fit
 
 def run_clustering(df, min_cluster_size=30, min_samples=10):
     """Run HDBSCAN clustering pipeline."""
     from sklearn.preprocessing import StandardScaler
     import hdbscan
 
-    # Filter: need at least MIN_FEATURES_REQUIRED non-null features
     feature_count = df[FEATURES].notna().sum(axis=1)
     eligible = df[feature_count >= MIN_FEATURES_REQUIRED].copy()
     log(f"Eligible planets (>={MIN_FEATURES_REQUIRED} features): {len(eligible)}")
 
     if len(eligible) < min_cluster_size * 2:
         print("  Not enough eligible planets for clustering")
-        return eligible, None, None
+        return eligible, None, None, None
 
-    # Impute
     log("Imputing missing values per discovery method ...")
-    imputed = impute_per_discovery_method(eligible)
+    imputed, n_imputed = impute_per_discovery_method(eligible)
+    imputed["n_imputed"] = n_imputed
 
-    # Log-transform features that span orders of magnitude
+    clusterable_mask = n_imputed <= MAX_IMPUTED_FOR_CLUSTERING
+    n_excluded = int((~clusterable_mask).sum())
+    if n_excluded:
+        log(f"Excluding {n_excluded} heavily imputed planets from HDBSCAN fit")
+
+    clusterable = imputed[clusterable_mask].copy()
+
     for feat in LOG_FEATURES:
-        mask = imputed[feat] > 0
-        imputed.loc[mask, feat] = np.log10(imputed.loc[mask, feat])
-        imputed.loc[~mask, feat] = imputed.loc[mask, feat].median()
+        mask = clusterable[feat] > 0
+        clusterable.loc[mask, feat] = np.log10(clusterable.loc[mask, feat])
+        clusterable.loc[~mask, feat] = clusterable.loc[mask, feat].median()
 
-    # Scale
     log("Scaling features ...")
-    X = imputed[FEATURES].values
+    X = clusterable[FEATURES].values
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    # Handle any remaining NaN (shouldn't happen but safety)
     nan_mask = np.isnan(X_scaled)
     if nan_mask.any():
         col_medians = np.nanmedian(X_scaled, axis=0)
         for j in range(X_scaled.shape[1]):
             X_scaled[nan_mask[:, j], j] = col_medians[j]
 
-    # HDBSCAN
     log(f"Running HDBSCAN (min_cluster_size={min_cluster_size}, min_samples={min_samples}) ...")
     clusterer = hdbscan.HDBSCAN(
         min_cluster_size=min_cluster_size,
@@ -191,14 +194,27 @@ def run_clustering(df, min_cluster_size=30, min_samples=10):
         metric='euclidean',
         cluster_selection_method='eom',
     )
-    labels = clusterer.fit_predict(X_scaled)
+    clusterable_labels = clusterer.fit_predict(X_scaled)
+
+    # Merge labels back into full imputed set; heavily imputed rows -> noise
+    labels = np.full(len(imputed), -1, dtype=int)
+    labels[clusterable_mask.values] = clusterable_labels
+    labels[~clusterable_mask] = -1
+
+    X_full = np.zeros((len(imputed), len(FEATURES)))
+    for i, feat in enumerate(FEATURES):
+        vals = imputed[feat].copy()
+        if feat in LOG_FEATURES:
+            pos = vals > 0
+            vals.loc[pos] = np.log10(vals.loc[pos])
+        X_full[:, i] = scaler.transform(vals.values.reshape(-1, 1)).ravel()
 
     n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
     n_noise = (labels == -1).sum()
     log(f"Clusters found: {n_clusters}")
     log(f"Noise points:   {n_noise}")
 
-    return eligible, labels, X_scaled
+    return imputed, labels, X_full
 
 
 # ── Cluster statistics ──────────────────────────────────────────────────────
@@ -291,6 +307,8 @@ def write_clusters(session, df, labels, X_scaled, cluster_stats):
         # Use individual classification so a 0.8 R⊕ planet in a 2 R⊕ cluster
         # is still labeled "Rocky" instead of "Sub-Neptune".
         cluster_name = individual_class(row.get("radius_earth"), row.get("eq_temperature_k"))
+        if int(row.get("n_imputed", 0)) > MAX_IMPUTED_FOR_CLUSTERING:
+            cluster_name = f"IMPUTED ({cluster_name})"
         if label == -1:
             cluster_name = f"NOISE ({cluster_name})"
 
@@ -308,7 +326,7 @@ def write_clusters(session, df, labels, X_scaled, cluster_stats):
             "cluster_name": cluster_name,
             "distance_to_centroid": round(dist, 4) if dist is not None else None,
             "features_used": FEATURES,
-            "algorithm": "HDBSCAN",
+            "algorithm": f"HDBSCAN;imputed={int(row.get('n_imputed', 0))}/{len(FEATURES)}",
             "run_at": run_at,
         })
 
@@ -372,7 +390,7 @@ These clusters may represent previously unrecognized planet populations.
     md += f"""
 ## Methodology
 1. Feature extraction: {', '.join(FEATURES)}
-2. Missing values: median imputation per discovery_method group
+2. Missing values: median imputation per discovery_method group (rows with >{MAX_IMPUTED_FOR_CLUSTERING} imputed features excluded from HDBSCAN fit)
 3. Log-transform: {', '.join(LOG_FEATURES)}
 4. Normalization: sklearn StandardScaler
 5. Clustering: HDBSCAN (EOM selection)
@@ -441,6 +459,8 @@ def run(min_cluster_size=30, min_samples=10, dry_run=False):
 
 
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="Taxonomy Engine")
     parser.add_argument("--min-cluster-size", type=int, default=30)
     parser.add_argument("--min-samples", type=int, default=10)

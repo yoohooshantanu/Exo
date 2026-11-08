@@ -27,14 +27,14 @@ import argparse
 from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
+from db_sync import create_sync_engine
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-DATABASE_URL = os.environ["DATABASE_URL"]
-engine       = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine       = create_sync_engine()
 SessionLocal = sessionmaker(bind=engine)
 
 

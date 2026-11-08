@@ -21,18 +21,16 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
-
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+from db_sync import create_sync_engine
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-DATABASE_URL  = os.environ["DATABASE_URL"]
-MODEL_VERSION = "1.0.0"
+from config import HABITABILITY_MODEL_VERSION as SCORE_VERSION, ORBITAL_MODEL_VERSION as PRED_VERSION
 
-engine  = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine  = create_sync_engine()
 Session = sessionmaker(bind=engine)
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
@@ -63,10 +61,10 @@ def query_anomalous_habitable(session):
         JOIN stars s ON p.star_id = s.star_id
         LEFT JOIN habitability_scores hs
             ON hs.planet_id = p.planet_id
-            AND hs.model_version = '4.2.0'
+            AND hs.model_version = :score_ver
         WHERE af.deviation_sigma >= 3.0
         ORDER BY hs.composite_score DESC NULLS LAST, af.deviation_sigma DESC
-    """)).fetchall()
+    """), {"score_ver": SCORE_VERSION}).fetchall()
 
     cols = ["planet_name", "planet_id", "hostname", "anomaly_type", "deviation_sigma",
             "observed_value", "expected_value", "unit", "model_reference",
@@ -94,7 +92,7 @@ def query_novel_taxonomy(session):
             JOIN stars s ON p.star_id = s.star_id
             LEFT JOIN habitability_scores hs
                 ON hs.planet_id = p.planet_id
-                AND hs.model_version = '4.2.0'
+                AND hs.model_version = :score_ver
             WHERE tc.cluster_label = -1
                OR tc.cluster_name NOT IN (
                   'Hot Giant', 'Warm Giant', 'Cold Giant',
@@ -105,7 +103,7 @@ def query_novel_taxonomy(session):
             ORDER BY p.planet_id, tc.run_at DESC
         ) sub
         ORDER BY composite_score DESC NULLS LAST
-    """)).fetchall()
+    """), {"score_ver": SCORE_VERSION}).fetchall()
 
     cols = ["planet_name", "planet_id", "hostname", "cluster_label",
             "cluster_name", "distance_to_centroid", "composite_score"]
@@ -137,11 +135,11 @@ def query_gap_biosignature(session):
         JOIN molecule_detections md ON md.planet_id = p2.planet_id
         LEFT JOIN habitability_scores hs
             ON hs.planet_id = p2.planet_id
-            AND hs.model_version = '4.2.0'
+            AND hs.model_version = :score_ver
         WHERE md.detection_sigma >= 2.0
-          AND op.model_version = '3.1.0'
+          AND op.model_version = :pred_ver
         ORDER BY md.detection_sigma DESC, op.stability_confidence DESC
-    """)).fetchall()
+    """), {"score_ver": SCORE_VERSION, "pred_ver": PRED_VERSION}).fetchall()
 
     cols = ["hostname", "star_id", "predicted_period_days", "stability_confidence",
             "gap_model", "biosig_planet", "molecule", "detection_sigma",
@@ -367,6 +365,12 @@ def run(dry_run=False):
         out_path = generate_synthesis_report(alert1, alert2, alert3, summary)
         print(f"    Saved -> {out_path}")
 
+        print(f"\n[6/6] Refreshing discovery scores materialized view ...")
+        from sqlalchemy import text
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            conn.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_discovery_scores"))
+        print(f"    Done.")
+
         print(f"\n{'='*60}")
         print(f"  Synthesis complete.")
         print(f"  Alert 1 (Anomalous + Habitable): {n_hab} high-priority planets")
@@ -383,6 +387,8 @@ def run(dry_run=False):
 
 
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="Synthesis Engine")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

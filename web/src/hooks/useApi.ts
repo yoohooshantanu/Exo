@@ -9,7 +9,11 @@ export function usePriorityTarget() {
   return useQuery({ queryKey: ['priority-target'], queryFn: () => api.priorityTarget() })
 }
 
-export function usePlanets(params: { page?: number; page_size?: number; method?: string; year_min?: number; year_max?: number; min_score?: number }) {
+export function useTaxonomyStats() {
+  return useQuery({ queryKey: ['taxonomy-stats'], queryFn: () => api.taxonomyStats() })
+}
+
+export function usePlanets(params: { page?: number; page_size?: number; method?: string; year_min?: number; year_max?: number; min_score?: number; search?: string }) {
   return useQuery({
     queryKey: ['planets', params],
     queryFn: () => api.planets(params),

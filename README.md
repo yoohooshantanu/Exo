@@ -1,4 +1,3 @@
-
 # Exo — Exoplanet Discovery Platform
 
 There are over 6,000 confirmed exoplanets in the NASA archive. Each has measured radius, mass, orbital period, temperature, host star properties — but that data lives across different catalogs, and actually deciding which planets deserve follow-up observation means juggling habitability estimates, spectral data, orbital stability simulations, and anomaly detection separately.
@@ -38,6 +37,9 @@ flowchart LR
 - [Quick Start](#-quick-start)
 - [Project Map](#-project-map)
 - [References](#-references)
+- [Validation](#-validation)
+- [Methodology Notes](#-methodology-notes)
+- [Limitations](#%EF%B8%8F-limitations)
 
 ---
 
@@ -63,9 +65,9 @@ Each engine is a standalone Python script that reads from and writes to the shar
 
 ### Engine 1 · Habitability Scorer
 
-> `modules/habitability_scorer.py` · v4.2.0
+> `modules/habitability_scorer.py` · v5.0.0
 
-Scores every confirmed planet on **two tracks** — one measures how Earth-like the planet is physically, the other measures how dangerous its environment would be for life. Existing catalogs only do the first one.
+Scores every confirmed planet on **two tracks** — one measures how Earth-like the planet is physically, the other measures how capable the planet is of long-term survival (environmental risk). Existing catalogs only do the first one.
 
 <details>
 <summary><b>Track 1 — Earth Similarity Index (ESI)</b> &nbsp;·&nbsp; <i>click to expand</i></summary>
@@ -87,7 +89,7 @@ $$\text{ESI} = \prod_{i=1}^{n} \left( 1 - \left| \frac{x_i - x_0}{x_i + x_0} \ri
 - If only radius and temperature exist, the index computes with $n = 2$ (minimum 2 components, must include temperature).
 - Implausible mass values (mass > 10 × R^2.5 — likely upper limits, not measurements) are treated as missing.
 
-**Validation:** Pearson correlation against UPR's published ESI for 19 reference planets (TRAPPIST-1 e, Proxima Cen b, Kepler-442 b, etc.). Target: **r ≥ 0.70**.
+**Validation:** Pearson correlation against UPR's published ESI for 20 reference planets (TRAPPIST-1 e, Proxima Cen b, Kepler-442 b, etc.). Target: **r ≥ 0.70**. Run `python -m validation.run_validation` to verify.
 
 </details>
 
@@ -98,11 +100,11 @@ $$\text{ESI} = \prod_{i=1}^{n} \left( 1 - \left| \frac{x_i - x_0}{x_i + x_0} \ri
 
 This is the platform's novel contribution. It penalizes conditions that undermine habitability even when physical parameters look Earth-like:
 
-$$\text{Risk} = 0.45 \cdot \text{Flare} + 0.30 \cdot \text{Tidal} + 0.15 \cdot \text{Ecc} + 0.10 \cdot \text{Age}$$
+$$\text{Risk} = 0.45 \cdot \text{XUV Escape} + 0.30 \cdot \text{Tidal} + 0.15 \cdot \text{Ecc} + 0.10 \cdot \text{Age}$$
 
 | Factor | Weight | Logic |
 |:---|---:|:---|
-| **Flare activity** | 0.45 | Teff → flare risk lookup. M-dwarfs (< 3700 K) score 0.30 — they strip atmospheres. G-dwarfs peak at 1.0. Heaviest weight because atmosphere stripping is the primary failure mode for HZ planets around red dwarfs. |
+| **XUV Escape (Retention)** | 0.45 | Physically-motivated calculation of envelope loss over time (Luger & Barnes). Atmosphere stripping is the primary failure mode for HZ planets around red dwarfs. |
 | **Tidal locking** | 0.30 | Sigmoid of τ_lock ∝ a⁶/(M★² · R_p⁵). Close-in planets get penalized for permanent day/night split. |
 | **Eccentricity** | 0.15 | exp(−2.057 · e²). High eccentricity → extreme seasonal temperature swings. |
 | **Stellar age** | 0.10 | Inverse-sqrt activity proxy. Young stars are magnetically active. |
@@ -113,7 +115,7 @@ All sub-scores are floored at 0.2 — no single missing parameter can zero out t
 
 **Composite:** &ensp; `0.70 × similarity + 0.30 × risk`
 
-The composite correlation against UPR is expected to be *lower* than the similarity-only correlation — that's the point. The risk track deliberately down-ranks M-dwarf planets that standard ESI overrates.
+The composite correlation against UPR is expected to be *lower* than the similarity-only correlation — that's the point. The risk track deliberately down-ranks planets lacking long-term thermal retention that standard ESI overrates.
 
 <br>
 
@@ -255,28 +257,25 @@ flowchart LR
 
 ---
 
-## 📊 Discovery Score
+## 📊 Decision Layer (Discovery Indices)
 
-Computed on-demand in the API (`api/main.py`) — not stored in the database, derived live from module outputs:
+Rather than conflating physical properties, observational metrics, and post-hoc data into a single circular metric, the platform explicitly separates triage into three distinct indices computed in `mv_discovery_scores`:
 
 ```mermaid
-pie title Discovery Score Composition (100 pts)
-    "Habitability (40)" : 40
-    "Biosignatures (25)" : 25
-    "Data Quality (15)" : 15
-    "Orbital Context (10)" : 10
-    "Anomaly Penalty (-10)" : 10
+pie title The Three Discovery Indices
+    "Physical Triage (Habitability - Anomaly)" : 40
+    "Observability (Geometric SNR)" : 30
+    "Characterization (Spectra + Biosigs)" : 30
 ```
 
-| Component | Max | Calculation |
-|:---|---:|:---|
-| **Habitability** | 40 | `composite_score × 40` |
-| **Biosignatures** | 25 | confirmed_molecules × 5 × (0.5 + 0.5 × avg_σ/5), capped |
-| **Data Quality** | 15 | spectra available (5) + instrument tier (JWST=5, HST=3.5, other=2) + completeness (5) |
-| **Orbital Context** | 10 | sibling planets × 1.5 + predicted gaps × 2.0, capped |
-| **Anomaly Penalty** | −10 | −min(anomaly_count × 3, 10) |
+| Index | Formulation | Purpose |
+|:---|:---|:---|
+| **Physical Triage** | Habitability composite × 40 − anomaly penalty | Measures *intrinsic physical interest* prior to any observation bias. |
+| **Observability** | log₁₀((R_p/R_s)² / d²) proxy, 0–100 scaled | Measures *how easy* the planet is to observe (transit depth & distance). |
+| **Characterization** | Biosignatures + spectra availability (Data Quality) | Measures *what we have already learned* post-observation. |
 
-$$\text{Discovery Score} = \text{clamp}(H + B + D + O + A, \enspace 0, \enspace 100)$$
+> **Why three indices?**  
+> We empirically falsified the monolithic "Discovery Score". Our Path B study demonstrated that physical habitability *does not predict* JWST follow-up (OR ≈ 1.03 after outlier removal). JWST follow-up is almost entirely driven by the **Observability** proxy. Combining them creates a tautology where the score predicts JWST time only because it includes JWST data. Separating them is the only honest way to rank targets.
 
 ---
 
@@ -386,13 +385,16 @@ The `orbital_predictions.predicted_at` column is deliberately immutable — the 
 # 1 — Clone
 git clone https://github.com/yoohooshantanu/Exo.git && cd Exo
 
-# 2 — Start the full stack (PostGIS, Redis, FastAPI, React)
+# 2 — Configure secrets (copy and edit)
+cp .env.example .env
+
+# 3 — Start the full stack (PostGIS, Redis, API, Celery worker, React)
 docker-compose up -d
 
-# 3 — Ingest the NASA archive (~2 min)
+# 4 — Ingest the NASA archive (~2 min)
 docker-compose exec api python pipe/nasa_ingestor.py
 
-# 4 — Run the analytical engines
+# 5 — Run the analytical engines
 docker-compose exec api python modules/habitability_scorer.py
 docker-compose exec api python modules/orbital_gap_predictor.py
 docker-compose exec api python modules/biosignature_detector.py
@@ -464,9 +466,64 @@ Exo/
 | Zeng et al. (2016). *Mass–Radius Relation for Rocky Planet Interiors.* ApJ 819, 127. | Composition curves |
 | Gordon et al. (2022). *The HITRAN2020 molecular spectroscopic database.* JQSRT 277, 107949. | Molecular line lists |
 | Winn & Fabrycky (2015). *The Occurrence and Architecture of Exoplanetary Systems.* ARA&A 53. | Eccentricity benchmarks |
+| Kopparapu et al. (2013). *Habitable Zones Around Main-Sequence Stars: New Estimates.* ApJ 765:131. | HZ boundaries |
+| Rackham, Apai & Giampapa (2018). *The Transit Light Source Effect.* ApJ 853:122. | Stellar contamination risk |
+| Luger & Barnes (2015). *Extreme Water Loss and Abiotic O2 Buildup on Planets Throughout the Habitable Zones of M Dwarfs.* Astrobiology 15:2. | XUV escape & atmospheric retention |
+| Bean, Stevenson & Batalha (2018). *A Statistical Comparative Planetology Approach.* PASP 130:114402. | JWST performance baseline |
 
 ---
 
 <p align="center">
   <sub>Built for the question that keeps astronomers up at night: <i>where should we point the telescope next?</i></sub>
 </p>
+
+---
+
+## 🔬 Validation
+
+The platform includes a scientific validation suite (`validation/`) separate from data integrity checks (`pipe/validation_suite.py`).
+
+| Check | What It Tests | Pass Criterion | Mode |
+|:---|:---|:---|:---|
+| **ESI Benchmark** | `compute_similarity_esi()` vs UPR published values for 20 planets | Pearson r ≥ 0.70 | Offline |
+| **Solar System Sanity** | Earth, Venus, Mars, Jupiter through `score_planet()` | Earth composite > 0.75, Jupiter < 0.40 | Offline |
+| **Biosig Cross-Check** | Our detections vs confirmed JWST results (WASP-39 b, K2-18 b) | ≥ 60% agreement | Live DB |
+| **Weight Stability** | Top-20 ranking under ±20% weight perturbation (1000 trials) | ≥ 70% retention | Live DB |
+| **Sensitivity Analysis** | MC perturbation of fundamentals (radius, mass) through scorer | Report IQR per planet | Live DB |
+| **XUV Escape Empirical Check** | Consistency against JWST/HST retained/stripped labels for 8 independent targets | Physically-motivated replacement; empirical consistency check on 8 JWST targets is directionally positive but statistically inconclusive (AUC ≈ 0.67) and dominated by planet size. | Live DB |
+
+```bash
+python -m validation.run_validation              # offline checks
+python -m validation.run_validation --live        # + DB-dependent checks
+python -m validation.run_validation --thorough    # + MC sensitivity analysis
+```
+
+Report saved to `outputs/validation_report.md`.
+
+---
+
+## 📋 Methodology Notes
+
+Every hardcoded constant in the scoring pipeline is annotated with its classification:
+
+| Classification | Meaning | Example |
+|:---|:---|:---|
+| **LITERATURE-DERIVED** | Directly from a published paper | ESI exponents (Schulze-Makuch 2011) |
+| **STANDARD VALUE** | Community-accepted default | 3σ detection threshold |
+| **TRIAGE HEURISTIC** | Hand-chosen for triage, not fitted | Risk weights (0.45/0.30/0.15/0.10) |
+| **DECISION-SUPPORT HEURISTIC** | Composite ranking metric | Discovery Score weights |
+
+See the source-level comments in `modules/habitability_scorer.py`, `modules/biosignature_detector.py`, and `modules/discovery_score.py` for per-constant citations.
+
+---
+
+## ⚠️ Limitations
+
+1. **Discovery Score weights are hand-chosen.** The 40/25/15/10/−10 weights encode expert judgment but have not been fitted to outcomes or validated against observation proposals. See `validation/weight_stability.py` for sensitivity analysis.
+
+2. **Penalty constants are triage heuristics.** XUV escape models, stellar contamination sigma penalties, instrument quality scalars, and abiotic adjustment values are deliberately conservative approximations. Each is labeled in source with its classification and caveats.
+
+3. **No uncertainty propagation beyond Habitability.** The habitability composite score now includes a Monte Carlo IQR and flags when mass is imputed. However, the three triage indices and specific sub-components (like XUV escape) do not yet fully propagate this structural uncertainty.
+4. **Data quality component was circular for validation.** The old monolithic Discovery Score's data_quality term rewarded having JWST/HST spectra. Correlating the score against "was observed by JWST" partly recovered this component's own definition — which is why the indices were explicitly separated.
+
+5. **Solar System bodies are not in the dataset.** Earth, Venus, Mars, Jupiter are used as sanity checks with hardcoded parameters, not as DB entries.

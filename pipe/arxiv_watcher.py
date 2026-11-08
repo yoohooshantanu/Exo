@@ -19,19 +19,24 @@ Safe to re-run — skips papers already in database by arxiv_id.
 
 import os
 import re
+import sys
 import time
 import httpx
 import feedparser
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 import uuid
 
-load_dotenv()
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "modules"))
+load_dotenv(PROJECT_ROOT / ".env")
 
-DATABASE_URL = os.environ["DATABASE_URL"]
-engine       = create_engine(DATABASE_URL, pool_pre_ping=True)
+from db_sync import create_sync_engine
+
+engine       = create_sync_engine()
 Session      = sessionmaker(bind=engine)
 
 # ── arXiv API config ──────────────────────────────────────────────────────────
@@ -56,9 +61,9 @@ PLANET_PATTERNS = [
     r'\b(WASP-\d+\s*[b-z])\b',
     r'\b(HAT-P-\d+\s*[b-z])\b',
     r'\b(TRAPPIST-\d+\s*[b-z])\b',
-    r'\b(GJ\s*\d+\s*[b-z])\b',
+    r'\b(GJ\s*-?\s*\d+\s*[b-z])\b',
     r'\b(HD\s*\d+\s*[b-z])\b',
-    r'\b(55\s*Cnc\s*[b-z])\b',
+    r'\b(55\s*(?:Cnc|Cancri)\s*[b-z])\b',
     r'\b(tau\s*Cet\s*[b-z])\b',
     r'\b(LHS\s*\d+\s*[b-z])\b',
     r'\b(LP\s*\d+-\d+\s*[b-z])\b',
@@ -386,24 +391,6 @@ def run(lookback_days: int = LOOKBACK_DAYS):
     finally:
         session.close()
 
-
-# ── paper_planet_mentions table ───────────────────────────────────────────────
-# This is a lightweight junction table to add via a second migration.
-# Tracks which papers mention which planets — soft provenance link.
-# Run this SQL against your database after the main migration:
-JUNCTION_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS paper_planet_mentions (
-    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    paper_id   UUID NOT NULL REFERENCES papers(paper_id) ON DELETE CASCADE,
-    planet_id  UUID REFERENCES planets(planet_id) ON DELETE SET NULL,
-    star_id    UUID REFERENCES stars(star_id)   ON DELETE SET NULL,
-    name_found TEXT NOT NULL,    -- exact string matched in the abstract
-    created_at TIMESTAMPTZ DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS ix_ppm_paper_id  ON paper_planet_mentions(paper_id);
-CREATE INDEX IF NOT EXISTS ix_ppm_planet_id ON paper_planet_mentions(planet_id);
-CREATE INDEX IF NOT EXISTS ix_ppm_star_id   ON paper_planet_mentions(star_id);
-"""
 
 
 if __name__ == "__main__":

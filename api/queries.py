@@ -1,14 +1,24 @@
 """SQL queries for the API."""
 from sqlalchemy import text
 
-DISCOVERY_SCORE_SQL = """ROUND((
+from modules.discovery_score import DATA_QUALITY_SQL
+
+DISCOVERY_SCORE_SQL = f"""ROUND(GREATEST(0, LEAST((
     COALESCE(hs.composite_score, 0) * 40
-    + LEAST((SELECT COUNT(*) FROM molecule_detections md WHERE md.planet_id = p.planet_id AND md.detection_sigma >= 3) * 5.0, 25)
-    + CASE WHEN EXISTS(SELECT 1 FROM atmospheric_spectra asp WHERE asp.planet_id = p.planet_id) THEN 7 ELSE 0 END
-    + (SELECT COUNT(*) FROM planet_parameters pp2 WHERE pp2.planet_id = p.planet_id AND pp2.is_default = true AND pp2.value IS NOT NULL) * 1.0
-    + LEAST((SELECT COUNT(*) FROM planets p2 WHERE p2.star_id = p.star_id AND p2.status = 'confirmed') * 1.5, 10)
+    + LEAST(
+        COALESCE((
+          SELECT COUNT(*) * 5.0 * (0.5 + 0.5 * LEAST(AVG(md.detection_sigma), 10.0) / 5.0)
+          FROM molecule_detections md
+          WHERE md.planet_id = p.planet_id AND md.detection_sigma >= 3
+        ), 0)
+      , 25)
+    + {DATA_QUALITY_SQL}
+    + LEAST(
+        (SELECT COUNT(*) FROM planets p2 WHERE p2.star_id = p.star_id AND p2.status = 'confirmed') * 1.5
+        + (SELECT COUNT(*) FROM orbital_predictions op WHERE op.star_id = p.star_id) * 2.0
+      , 10)
     - LEAST((SELECT COUNT(*) FROM anomaly_flags af WHERE af.planet_id = p.planet_id) * 3.0, 10)
-)::numeric, 1)"""
+), 100))::numeric, 1)"""
 
 
 PLANET_LIST = text(f"""
@@ -23,9 +33,14 @@ SELECT
     MAX(CASE WHEN pp.param_name = 'eq_temperature_k' THEN pp.value END) AS eq_temperature_k,
     MAX(CASE WHEN pp.param_name = 'semi_major_axis_au' THEN pp.value END) AS semi_major_axis_au,
     hs.composite_score,
+    hs.composite_score_iqr,
+    hs.is_imputed,
     hs.hz_score,
     tc.cluster_name,
-    {DISCOVERY_SCORE_SQL} AS discovery_score
+    COALESCE(mvs.discovery_score, 0) AS discovery_score,
+    mvs.observability_index,
+    mvs.physical_triage_index,
+    mvs.characterization_index
 FROM planets p
 JOIN stars s ON p.star_id = s.star_id
 LEFT JOIN planet_parameters pp
@@ -37,15 +52,20 @@ LEFT JOIN (
     FROM taxonomy_clusters
     ORDER BY planet_id, run_at DESC
 ) tc ON tc.planet_id = p.planet_id
+LEFT JOIN mv_discovery_scores mvs ON mvs.planet_id = p.planet_id
 WHERE (CAST(:method AS VARCHAR) IS NULL OR p.discovery_method = CAST(:method AS VARCHAR))
   AND (CAST(:year_min AS INTEGER) IS NULL OR p.discovery_year >= CAST(:year_min AS INTEGER))
   AND (CAST(:year_max AS INTEGER) IS NULL OR p.discovery_year <= CAST(:year_max AS INTEGER))
-  AND (CAST(:min_score AS REAL) IS NULL OR hs.composite_score >= CAST(:min_score AS REAL))
+  AND (CAST(:min_score AS REAL) IS NULL OR COALESCE(mvs.discovery_score, 0) >= CAST(:min_score AS REAL))
+  AND (CAST(:search AS VARCHAR) IS NULL
+       OR p.planet_name ILIKE '%' || CAST(:search AS VARCHAR) || '%'
+       OR s.hip_name ILIKE '%' || CAST(:search AS VARCHAR) || '%')
   AND p.status = 'confirmed'
-GROUP BY p.planet_id, p.planet_name, s.hip_name,
+GROUP BY p.planet_id, mvs.discovery_score, mvs.observability_index, mvs.physical_triage_index, mvs.characterization_index, 
+         p.planet_name, s.hip_name, hs.composite_score_iqr, hs.is_imputed,
          p.discovery_method, p.discovery_year,
          hs.composite_score, hs.hz_score, tc.cluster_name
-ORDER BY discovery_score DESC NULLS LAST, p.planet_name
+ORDER BY mvs.physical_triage_index DESC NULLS LAST, p.planet_name
 LIMIT :limit OFFSET :offset
 """)
 
@@ -55,12 +75,61 @@ FROM planets p
 JOIN stars s ON p.star_id = s.star_id
 LEFT JOIN habitability_scores hs
     ON hs.planet_id = p.planet_id AND hs.model_version = :score_version
+LEFT JOIN mv_discovery_scores mvs ON mvs.planet_id = p.planet_id
 WHERE (CAST(:method AS VARCHAR) IS NULL OR p.discovery_method = CAST(:method AS VARCHAR))
   AND (CAST(:year_min AS INTEGER) IS NULL OR p.discovery_year >= CAST(:year_min AS INTEGER))
   AND (CAST(:year_max AS INTEGER) IS NULL OR p.discovery_year <= CAST(:year_max AS INTEGER))
-  AND (CAST(:min_score AS REAL) IS NULL OR hs.composite_score >= CAST(:min_score AS REAL))
+  AND (CAST(:min_score AS REAL) IS NULL OR COALESCE(mvs.discovery_score, 0) >= CAST(:min_score AS REAL))
+  AND (CAST(:search AS VARCHAR) IS NULL
+       OR p.planet_name ILIKE '%' || CAST(:search AS VARCHAR) || '%'
+       OR s.hip_name ILIKE '%' || CAST(:search AS VARCHAR) || '%')
   AND p.status = 'confirmed'
 """)
+
+CSV_EXPORT = text(f"""
+SELECT
+    p.planet_name,
+    s.hip_name AS hostname,
+    p.discovery_method,
+    p.discovery_year,
+    MAX(CASE WHEN pp.param_name = 'radius_earth' THEN pp.value END) AS radius_earth,
+    MAX(CASE WHEN pp.param_name = 'mass_earth' THEN pp.value END) AS mass_earth,
+    MAX(CASE WHEN pp.param_name = 'period_days' THEN pp.value END) AS period_days,
+    MAX(CASE WHEN pp.param_name = 'eq_temperature_k' THEN pp.value END) AS eq_temperature_k,
+    MAX(CASE WHEN pp.param_name = 'semi_major_axis_au' THEN pp.value END) AS semi_major_axis_au,
+    tc.cluster_name,
+    mvs.observability_index,
+    mvs.physical_triage_index,
+    mvs.characterization_index,
+    hs.composite_score,
+    hs.composite_score_iqr,
+    hs.is_imputed
+FROM planets p
+JOIN stars s ON p.star_id = s.star_id
+LEFT JOIN planet_parameters pp
+    ON pp.planet_id = p.planet_id AND pp.is_default = true AND pp.valid_to IS NULL
+LEFT JOIN habitability_scores hs
+    ON hs.planet_id = p.planet_id AND hs.model_version = :score_version
+LEFT JOIN (
+    SELECT DISTINCT ON (planet_id) planet_id, cluster_name
+    FROM taxonomy_clusters
+    ORDER BY planet_id, run_at DESC
+) tc ON tc.planet_id = p.planet_id
+LEFT JOIN mv_discovery_scores mvs ON mvs.planet_id = p.planet_id
+WHERE (CAST(:method AS VARCHAR) IS NULL OR p.discovery_method = CAST(:method AS VARCHAR))
+  AND (CAST(:year_min AS INTEGER) IS NULL OR p.discovery_year >= CAST(:year_min AS INTEGER))
+  AND (CAST(:year_max AS INTEGER) IS NULL OR p.discovery_year <= CAST(:year_max AS INTEGER))
+  AND (CAST(:min_score AS REAL) IS NULL OR COALESCE(mvs.discovery_score, 0) >= CAST(:min_score AS REAL))
+  AND (CAST(:search AS VARCHAR) IS NULL
+       OR p.planet_name ILIKE '%' || CAST(:search AS VARCHAR) || '%'
+       OR s.hip_name ILIKE '%' || CAST(:search AS VARCHAR) || '%')
+  AND p.status = 'confirmed'
+GROUP BY p.planet_id, mvs.observability_index, mvs.physical_triage_index, mvs.characterization_index, 
+         p.planet_name, s.hip_name, hs.composite_score, hs.composite_score_iqr, hs.is_imputed,
+         p.discovery_method, p.discovery_year, tc.cluster_name
+ORDER BY mvs.physical_triage_index DESC NULLS LAST, p.planet_name
+""")
+
 
 PLANET_DETAIL = text(f"""
 SELECT
@@ -84,31 +153,37 @@ SELECT
     hs.radius_esi_score,
     hs.mass_esi_score,
     hs.tidal_lock_score,
-    hs.flare_score,
+    hs.xuv_escape_score,
     hs.eccentricity_score,
     hs.age_score,
     COALESCE(
         (hs.input_snapshot->>'sim_score')::float,
-        CASE WHEN hs.composite_score IS NOT NULL AND hs.flare_score IS NOT NULL
+        CASE WHEN hs.composite_score IS NOT NULL AND hs.xuv_escape_score IS NOT NULL
              THEN (hs.composite_score - 0.30 * COALESCE(
-                 (COALESCE(hs.flare_score, 0) * 0.45 + COALESCE(hs.tidal_lock_score, 0) * 0.30 +
+                 (COALESCE(hs.xuv_escape_score, 0) * 0.45 + COALESCE(hs.tidal_lock_score, 0) * 0.30 +
                   COALESCE(hs.eccentricity_score, 0) * 0.15 + COALESCE(hs.age_score, 0) * 0.10), 0
              )) / 0.70
              ELSE NULL
         END
     ) AS similarity_score,
     COALESCE(
+        (hs.input_snapshot->>'safety_score')::float,
         (hs.input_snapshot->>'risk_score')::float,
-        CASE WHEN hs.flare_score IS NOT NULL
-             THEN COALESCE(hs.flare_score, 0) * 0.45 + COALESCE(hs.tidal_lock_score, 0) * 0.30 +
+        CASE WHEN hs.xuv_escape_score IS NOT NULL
+             THEN COALESCE(hs.xuv_escape_score, 0) * 0.45 + COALESCE(hs.tidal_lock_score, 0) * 0.30 +
                   COALESCE(hs.eccentricity_score, 0) * 0.15 + COALESCE(hs.age_score, 0) * 0.10
              ELSE NULL
         END
-    ) AS risk_score,
+    ) AS safety_score,
     tc.cluster_label,
     tc.cluster_name,
     tc.distance_to_centroid,
-    {DISCOVERY_SCORE_SQL} AS discovery_score
+    COALESCE(mvs.discovery_score, 0) AS discovery_score,
+    mvs.observability_index,
+    mvs.physical_triage_index,
+    mvs.characterization_index,
+    hs.composite_score_iqr,
+    hs.is_imputed
 FROM planets p
 JOIN stars s ON p.star_id = s.star_id
 LEFT JOIN planet_parameters pp
@@ -120,11 +195,13 @@ LEFT JOIN (
     FROM taxonomy_clusters
     ORDER BY planet_id, run_at DESC
 ) tc ON tc.planet_id = p.planet_id
+LEFT JOIN mv_discovery_scores mvs ON mvs.planet_id = p.planet_id
 WHERE p.planet_name = :planet_name
-GROUP BY p.planet_id, s.hip_name, s.star_id,
-         hs.composite_score, hs.hz_score, hs.teq_score,
+GROUP BY p.planet_id, mvs.discovery_score, mvs.observability_index, mvs.physical_triage_index, mvs.characterization_index,
+         s.hip_name, s.star_id,
+         hs.composite_score, hs.composite_score_iqr, hs.is_imputed, hs.hz_score, hs.teq_score,
          hs.radius_esi_score, hs.mass_esi_score,
-         hs.tidal_lock_score, hs.flare_score,
+         hs.tidal_lock_score, hs.xuv_escape_score,
          hs.eccentricity_score, hs.age_score, hs.input_snapshot,
          tc.cluster_label, tc.cluster_name, tc.distance_to_centroid
 """)
@@ -165,7 +242,7 @@ SELECT p_sib.planet_name, p_sib.status,
 FROM planets p_target
 JOIN stars s ON p_target.star_id = s.star_id
 JOIN planets p_sib ON p_sib.star_id = s.star_id
-LEFT JOIN planet_parameters pp ON p_sib.planet_id = pp.planet_id AND pp.is_default = true
+LEFT JOIN planet_parameters pp ON p_sib.planet_id = pp.planet_id AND pp.is_default = true AND pp.valid_to IS NULL
 WHERE p_target.planet_name = :planet_name AND p_sib.status = 'confirmed'
 GROUP BY p_sib.planet_id, p_sib.planet_name, p_sib.status
 ORDER BY period_days ASC NULLS LAST
@@ -233,7 +310,10 @@ RANKINGS_TOP_HABITABLE = text(f"""
 SELECT
     p.planet_name,
     s.hip_name AS hostname,
-    {DISCOVERY_SCORE_SQL} AS discovery_score,
+    COALESCE(mvs.discovery_score, 0) AS discovery_score,
+    mvs.observability_index,
+    mvs.physical_triage_index,
+    mvs.characterization_index,
     'Top Discovery' AS category,
     tc.cluster_name AS detail
 FROM habitability_scores hs
@@ -243,8 +323,9 @@ LEFT JOIN (
     SELECT DISTINCT ON (planet_id) planet_id, cluster_name
     FROM taxonomy_clusters ORDER BY planet_id, run_at DESC
 ) tc ON tc.planet_id = p.planet_id
+LEFT JOIN mv_discovery_scores mvs ON mvs.planet_id = p.planet_id
 WHERE hs.model_version = :score_version AND hs.composite_score IS NOT NULL
-ORDER BY discovery_score DESC
+ORDER BY mvs.physical_triage_index DESC NULLS LAST
 LIMIT :limit
 """)
 
@@ -252,7 +333,7 @@ RANKINGS_ANOMALOUS = text(f"""
 SELECT
     p.planet_name,
     s.hip_name AS hostname,
-    {DISCOVERY_SCORE_SQL} AS discovery_score,
+    COALESCE(mvs.discovery_score, 0) AS discovery_score,
     'Anomalous' AS category,
     af.anomaly_type AS detail
 FROM anomaly_flags af
@@ -260,8 +341,9 @@ JOIN planets p ON af.planet_id = p.planet_id
 JOIN stars s ON p.star_id = s.star_id
 LEFT JOIN habitability_scores hs
     ON hs.planet_id = p.planet_id AND hs.model_version = :score_version
+LEFT JOIN mv_discovery_scores mvs ON mvs.planet_id = p.planet_id
 WHERE af.deviation_sigma >= 3.0
-ORDER BY discovery_score DESC, af.deviation_sigma DESC
+ORDER BY mvs.observability_index DESC NULLS LAST, af.deviation_sigma DESC
 LIMIT :limit
 """)
 
@@ -269,7 +351,7 @@ RANKINGS_NOVEL = text(f"""
 SELECT
     p.planet_name,
     s.hip_name AS hostname,
-    {DISCOVERY_SCORE_SQL} AS discovery_score,
+    COALESCE(mvs.discovery_score, 0) AS discovery_score,
     'Novel Taxonomy' AS category,
     tc.cluster_name AS detail
 FROM (
@@ -286,7 +368,8 @@ JOIN planets p ON tc.planet_id = p.planet_id
 JOIN stars s ON p.star_id = s.star_id
 LEFT JOIN habitability_scores hs
     ON hs.planet_id = p.planet_id AND hs.model_version = :score_version
-ORDER BY discovery_score DESC NULLS LAST
+LEFT JOIN mv_discovery_scores mvs ON mvs.planet_id = p.planet_id
+ORDER BY mvs.physical_triage_index DESC NULLS LAST
 LIMIT :limit
 """)
 
@@ -294,39 +377,27 @@ RANKINGS_BIOSIGNATURES = text(f"""
 SELECT
     p.planet_name,
     s.hip_name AS hostname,
-    ROUND((
-        COALESCE(hs.composite_score, 0) * 40
-        + LEAST((SELECT COUNT(*) FROM molecule_detections md_sub WHERE md_sub.planet_id = p.planet_id AND md_sub.detection_sigma >= 3) * 5.0, 25)
-        + CASE WHEN EXISTS(SELECT 1 FROM atmospheric_spectra asp WHERE asp.planet_id = p.planet_id) THEN 7 ELSE 0 END
-        + (SELECT COUNT(*) FROM planet_parameters pp2 WHERE pp2.planet_id = p.planet_id AND pp2.is_default = true AND pp2.value IS NOT NULL) * 1.0
-        + LEAST((SELECT COUNT(*) FROM planets p2 WHERE p2.star_id = p.star_id AND p2.status = 'confirmed') * 1.5, 10)
-        - LEAST((SELECT COUNT(*) FROM anomaly_flags af WHERE af.planet_id = p.planet_id) * 3.0, 10)
-    )::numeric, 1) AS discovery_score,
-    'Biosignature' AS category,
-    STRING_AGG(DISTINCT md.molecule, ', ') AS detail
+    COALESCE(mvs.discovery_score, 0) AS discovery_score,
+    mvs.observability_index,
+    mvs.physical_triage_index,
+    mvs.characterization_index,
+    'Strong Biosignature' AS category,
+    md.molecule AS detail
 FROM molecule_detections md
 JOIN planets p ON md.planet_id = p.planet_id
 JOIN stars s ON p.star_id = s.star_id
-LEFT JOIN habitability_scores hs
-    ON hs.planet_id = p.planet_id AND hs.model_version = :score_version
+LEFT JOIN mv_discovery_scores mvs ON mvs.planet_id = p.planet_id
 WHERE md.detection_sigma >= 2.0
-GROUP BY p.planet_id, p.planet_name, s.hip_name, s.star_id, hs.composite_score
-ORDER BY MAX(md.detection_sigma) DESC
+GROUP BY p.planet_id, mvs.discovery_score, mvs.observability_index, mvs.physical_triage_index, mvs.characterization_index, p.planet_name, s.hip_name, s.star_id, md.molecule
+ORDER BY mvs.characterization_index DESC NULLS LAST, MAX(md.detection_sigma) DESC
 LIMIT :limit
 """)
 
 RANKINGS_GAPS = text(f"""
 SELECT
-    p2.planet_name,
+    p.planet_name,
     s.hip_name AS hostname,
-    ROUND((
-        COALESCE(hs.composite_score, 0) * 40
-        + LEAST((SELECT COUNT(*) FROM molecule_detections md WHERE md.planet_id = p2.planet_id AND md.detection_sigma >= 3) * 5.0, 25)
-        + CASE WHEN EXISTS(SELECT 1 FROM atmospheric_spectra asp WHERE asp.planet_id = p2.planet_id) THEN 7 ELSE 0 END
-        + (SELECT COUNT(*) FROM planet_parameters pp2 WHERE pp2.planet_id = p2.planet_id AND pp2.is_default = true AND pp2.value IS NOT NULL) * 1.0
-        + LEAST((SELECT COUNT(*) FROM planets p3 WHERE p3.star_id = p2.star_id AND p3.status = 'confirmed') * 1.5, 10)
-        - LEAST((SELECT COUNT(*) FROM anomaly_flags af WHERE af.planet_id = p2.planet_id) * 3.0, 10)
-    )::numeric, 1) AS discovery_score,
+    COALESCE(mvs.discovery_score, 0) AS discovery_score,
     'Gap System' AS category,
     op.predicted_period_days::text || ' d' AS detail
 FROM (
@@ -336,10 +407,11 @@ FROM (
     ORDER BY star_id, stability_confidence DESC
 ) op
 JOIN stars s ON op.star_id = s.star_id
-JOIN planets p2 ON p2.star_id = s.star_id
+JOIN planets p ON p.star_id = s.star_id
 LEFT JOIN habitability_scores hs
-    ON hs.planet_id = p2.planet_id AND hs.model_version = :score_version
-ORDER BY op.stability_confidence DESC, p2.planet_name
+    ON hs.planet_id = p.planet_id AND hs.model_version = :score_version
+LEFT JOIN mv_discovery_scores mvs ON mvs.planet_id = p.planet_id
+ORDER BY mvs.observability_index DESC NULLS LAST, op.stability_confidence DESC, p.planet_name
 LIMIT :limit
 """)
 
@@ -464,7 +536,10 @@ PRIORITY_TARGET = text(f"""
 SELECT
     p.planet_name,
     s.hip_name AS hostname,
-    {DISCOVERY_SCORE_SQL} AS discovery_score,
+    COALESCE(mvs.discovery_score, 0) AS discovery_score,
+    mvs.observability_index,
+    mvs.physical_triage_index,
+    mvs.characterization_index,
     hs.hz_score,
     tc.cluster_name,
     MAX(CASE WHEN pp.param_name = 'radius_earth' THEN pp.value END) AS radius_earth,
@@ -477,6 +552,7 @@ SELECT
 FROM habitability_scores hs
 JOIN planets p ON hs.planet_id = p.planet_id
 JOIN stars s ON p.star_id = s.star_id
+LEFT JOIN mv_discovery_scores mvs ON mvs.planet_id = p.planet_id
 LEFT JOIN planet_parameters pp
     ON pp.planet_id = p.planet_id AND pp.is_default = true AND pp.valid_to IS NULL
 LEFT JOIN (
@@ -484,7 +560,7 @@ LEFT JOIN (
     FROM taxonomy_clusters ORDER BY planet_id, run_at DESC
 ) tc ON tc.planet_id = p.planet_id
 WHERE hs.model_version = :score_version AND hs.composite_score IS NOT NULL
-GROUP BY p.planet_id, p.planet_name, s.hip_name,
+GROUP BY p.planet_id, p.planet_name, s.hip_name, mvs.discovery_score, mvs.observability_index, mvs.physical_triage_index, mvs.characterization_index,
          hs.composite_score, hs.hz_score, tc.cluster_name
 ORDER BY discovery_score DESC
 LIMIT 1

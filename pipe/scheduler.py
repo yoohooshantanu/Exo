@@ -27,16 +27,21 @@ import numpy as np
 from io import StringIO
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "modules"))
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "pipe"))
 
 # Prefect imports
 from prefect import flow, task, get_run_logger
 
 load_dotenv()
 
-DATABASE_URL = os.environ["DATABASE_URL"]
-engine       = create_engine(DATABASE_URL, pool_pre_ping=True)
+from db_sync import create_sync_engine
+
+engine       = create_sync_engine()
 Session      = sessionmaker(bind=engine)
 
 # ── shared constants ──────────────────────────────────────────────────────────
@@ -129,7 +134,6 @@ def run_arxiv_watcher_task(lookback_days: int = 2):
     logger.info(f"Running arXiv watcher (lookback={lookback_days}d) ...")
 
     # import and run the watcher
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from arxiv_watcher import run as arxiv_run
     arxiv_run(lookback_days=lookback_days)
     logger.info("arXiv watcher complete")
@@ -165,54 +169,63 @@ def upsert_planets_to_db(df: pd.DataFrame) -> int:
     count   = 0
 
     try:
+        from uuid import uuid4
+        
+        # 1. Fetch existing stars and planets into lookup dicts
+        existing_stars = {
+            r[0]: r[1] for r in session.execute(text("SELECT hip_name, star_id FROM stars")).fetchall()
+        }
+        existing_planets = {
+            r[0] for r in session.execute(text("SELECT planet_name FROM planets")).fetchall()
+        }
+        
+        new_stars = []
+        new_planets = []
+        
         for _, row in df.iterrows():
-            pl_name  = row.get("pl_name")
+            pl_name = row.get("pl_name")
             hostname = row.get("hostname")
             if not pl_name or not hostname:
                 continue
-
-            # upsert star first
-            star = session.execute(
-                text("SELECT star_id FROM stars WHERE hip_name = :n"),
-                {"n": hostname}
-            ).fetchone()
-
-            if not star:
-                from uuid import uuid4
+                
+            # Star logic
+            star_id = existing_stars.get(hostname)
+            if not star_id:
                 star_id = str(uuid4())
-                session.execute(text("""
-                    INSERT INTO stars (star_id, hip_name, ra, dec, distance_pc, created_at)
-                    VALUES (:sid, :name, :ra, :dec, :dist, now())
-                """), {
-                    "sid":  star_id, "name": hostname,
-                    "ra":   _nv(row.get("ra")), "dec": _nv(row.get("dec")),
+                existing_stars[hostname] = star_id
+                new_stars.append({
+                    "sid": star_id, "name": hostname,
+                    "ra": _nv(row.get("ra")), "dec": _nv(row.get("dec")),
                     "dist": _nv(row.get("sy_dist"))
                 })
-            else:
-                star_id = star[0]
-
-            # upsert planet
-            planet = session.execute(
-                text("SELECT planet_id FROM planets WHERE planet_name = :n"),
-                {"n": pl_name}
-            ).fetchone()
-
-            if not planet:
-                from uuid import uuid4
-                session.execute(text("""
-                    INSERT INTO planets
-                        (planet_id, star_id, planet_name, status,
-                         discovery_method, discovery_year, created_at)
-                    VALUES (:pid, :sid, :name, 'confirmed', :method, :year, now())
-                """), {
+                
+            # Planet logic
+            if pl_name not in existing_planets:
+                existing_planets.add(pl_name)
+                new_planets.append({
                     "pid": str(uuid4()), "sid": star_id, "name": pl_name,
                     "method": _nv(row.get("discoverymethod")),
-                    "year":   _nv(row.get("disc_year")),
+                    "year": _nv(row.get("disc_year")),
                 })
                 count += 1
-
+                
+        # Bulk Insert
+        if new_stars:
+            session.execute(text("""
+                INSERT INTO stars (star_id, hip_name, ra, dec, distance_pc, created_at)
+                VALUES (:sid, :name, :ra, :dec, :dist, now())
+            """), new_stars)
+            
+        if new_planets:
+            session.execute(text("""
+                INSERT INTO planets
+                    (planet_id, star_id, planet_name, status,
+                     discovery_method, discovery_year, created_at)
+                VALUES (:pid, :sid, :name, 'confirmed', :method, :year, now())
+            """), new_planets)
+            
         session.commit()
-        logger.info(f"Upserted {count} new planets")
+        logger.info(f"Upserted {len(new_stars)} new stars, {count} new planets")
         return count
 
     except Exception as e:
@@ -246,7 +259,6 @@ def nasa_sync_flow():
     logger.info("Starting nightly NASA sync ...")
 
     # Import and run the robust ingestor
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from nasa_ingestor import run_ingestion
     run_ingestion()
     
@@ -302,7 +314,6 @@ def run_spectra_ingestion_task():
     logger = get_run_logger()
     logger.info("Running atmospheric spectra ingestion ...")
 
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'modules'))
     from spectra_ingestor import run as spectra_run
     spectra_run()
     logger.info("Spectra ingestion complete")
@@ -313,7 +324,6 @@ def run_biosignature_detector_task():
     logger = get_run_logger()
     logger.info("Running biosignature detector ...")
 
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'modules'))
     from biosignature_detector import run as biosig_run
     biosig_run()
     logger.info("Biosignature detector complete")
@@ -339,7 +349,6 @@ def run_anomaly_detector_task():
     logger = get_run_logger()
     logger.info("Running anomaly detector ...")
 
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'modules'))
     from anomaly_detector import run as anomaly_run
     anomaly_run()
     logger.info("Anomaly detector complete")
@@ -350,7 +359,6 @@ def run_taxonomy_engine_task():
     logger = get_run_logger()
     logger.info("Running taxonomy engine ...")
 
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'modules'))
     from taxonomy_engine import run as taxonomy_run
     taxonomy_run()
     logger.info("Taxonomy engine complete")
@@ -361,7 +369,6 @@ def run_synthesis_task():
     logger = get_run_logger()
     logger.info("Running synthesis engine ...")
 
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'modules'))
     from synthesis_engine import run as synthesis_run
     synthesis_run()
     logger.info("Synthesis engine complete")

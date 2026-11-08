@@ -7,22 +7,37 @@ import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Button } from '@/components/ui/button'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from '@/components/ui/table'
 import PlanetDetailPanel from '@/components/PlanetDetailPanel'
+import { ErrorCard } from '@/components/ErrorCard'
 import AnimatedNumber from '@/components/AnimatedNumber'
-import { Search } from 'lucide-react'
+import { Search, Download } from 'lucide-react'
+import { API_URL } from '@/lib/api'
 import type { PlanetListItem } from '@/types'
 
 export default function Planets() {
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => clearTimeout(t)
+  }, [search])
+
   const [pages, setPages] = useState<PlanetListItem[]>([])
   const [page, setPage] = useState(1)
   const [selectedPlanet, setSelectedPlanet] = useState<string | null>(null)
   const loaderRef = useRef<HTMLDivElement>(null)
 
-  const { data, isLoading } = usePlanets({ page, page_size: 50 })
+  useEffect(() => {
+    setPages([])
+    setPage(1)
+  }, [debouncedSearch])
+
+  const { data, isLoading, isError, refetch } = usePlanets({ page, page_size: 50, search: debouncedSearch || undefined })
 
   useEffect(() => {
     if (data?.items) {
@@ -44,14 +59,15 @@ export default function Planets() {
     return () => obs.disconnect()
   }, [data, page])
 
-  const filtered = useMemo(() => {
-    if (!search) return pages
-    const q = search.toLowerCase()
-    return pages.filter(p =>
-      p.planet_name.toLowerCase().includes(q) ||
-      p.hostname?.toLowerCase().includes(q)
+  const filtered = pages
+
+  if (isError && pages.length === 0) {
+    return (
+      <div className="p-6 h-[50vh]">
+        <ErrorCard message="Failed to load planets catalog." onRetry={refetch} />
+      </div>
     )
-  }, [pages, search])
+  }
 
   return (
     <>
@@ -63,14 +79,29 @@ export default function Planets() {
           </span>
         </div>
 
-        <div className="relative max-w-sm animate-fade-up delay-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Filter planets..."
-            className="pl-10"
-          />
+        <div className="flex items-center gap-4 animate-fade-up delay-1 mb-6">
+          <div className="relative max-w-sm flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Filter planets..."
+              className="pl-10"
+            />
+          </div>
+          <Button 
+            variant="outline" 
+            onClick={() => {
+              const url = new URL('/api/export/planets', API_URL);
+              if (debouncedSearch) {
+                url.searchParams.append('search', debouncedSearch);
+              }
+              window.open(url.toString(), '_blank');
+            }}
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Export CSV
+          </Button>
         </div>
 
         <Card className="animate-fade-up delay-2">
@@ -108,9 +139,25 @@ export default function Planets() {
                   <TableHead className="text-xs uppercase tracking-wider text-right">
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <span className="cursor-help border-b border-dotted border-muted-foreground/50">D-Score</span>
+                        <span className="cursor-help border-b border-dotted border-muted-foreground/50">Obs.</span>
                       </TooltipTrigger>
-                      <TooltipContent><p>Discovery Score (0-100) — All modules combined</p></TooltipContent>
+                      <TooltipContent><p>Observability Index</p></TooltipContent>
+                    </Tooltip>
+                  </TableHead>
+                  <TableHead className="text-xs uppercase tracking-wider text-right">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-help border-b border-dotted border-muted-foreground/50">Triage</span>
+                      </TooltipTrigger>
+                      <TooltipContent><p>Physical Triage Index</p></TooltipContent>
+                    </Tooltip>
+                  </TableHead>
+                  <TableHead className="text-xs uppercase tracking-wider text-right">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-help border-b border-dotted border-muted-foreground/50">Char.</span>
+                      </TooltipTrigger>
+                      <TooltipContent><p>Characterization Index</p></TooltipContent>
                     </Tooltip>
                   </TableHead>
                   <TableHead className="text-xs uppercase tracking-wider text-right">Year</TableHead>
@@ -150,8 +197,18 @@ export default function Planets() {
                     <TableCell className="text-right font-data">{planet.mass_earth?.toFixed(2) ?? '—'}</TableCell>
                     <TableCell className="text-right font-data">{planet.period_days?.toFixed(1) ?? '—'}</TableCell>
                     <TableCell className="text-right">
-                      {planet.discovery_score != null ? (
-                        <span className="font-data text-chart-1">{planet.discovery_score.toFixed(1)}</span>
+                      {planet.observability_index != null ? (
+                        <span className="font-data text-chart-1">{planet.observability_index.toFixed(1)}</span>
+                      ) : '—'}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {planet.physical_triage_index != null ? (
+                        <span className="font-data text-chart-2">{planet.physical_triage_index.toFixed(1)}</span>
+                      ) : '—'}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {planet.characterization_index != null ? (
+                        <span className="font-data text-chart-3">{planet.characterization_index.toFixed(1)}</span>
                       ) : '—'}
                     </TableCell>
                     <TableCell className="text-right font-data text-muted-foreground">

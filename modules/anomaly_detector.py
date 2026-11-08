@@ -24,22 +24,19 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text, insert, update
+from sqlalchemy import text, insert, update
 from sqlalchemy.orm import sessionmaker
+from db_sync import create_sync_engine
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 from db.models import AnomalyFlag
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-DATABASE_URL  = os.environ["DATABASE_URL"]
-MODEL_VERSION = "1.0.0"
+from config import ANOMALY_MODEL_VERSION as MODEL_VERSION
 
-engine  = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine  = create_sync_engine()
 Session = sessionmaker(bind=engine)
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
@@ -50,13 +47,7 @@ def new_id(): return str(uuid.uuid4())
 def now_utc(): return datetime.now(timezone.utc)
 def log(msg): print(f"  {datetime.now(timezone.utc).strftime('%H:%M:%S')}  {msg}")
 
-def nv(val):
-    if val is None: return None
-    try:
-        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)): return None
-        if pd.isna(val): return None
-    except Exception: pass
-    return float(val)
+from utils import nv
 
 
 # ── Zeng et al. 2016 composition curves ──────────────────────────────────────
@@ -208,6 +199,7 @@ def detect_mass_radius_anomalies(df, mass_errors, threshold=3.0):
     subset = df.dropna(subset=["radius_earth", "mass_earth"])
     # Only consider planets < 4 R_earth (composition curves are not valid for gas giants)
     subset = subset[subset["radius_earth"] < 4.0]
+    subset = subset[subset["mass_earth"] < 50.0]
     # Pre-filter: exclude data errors
     subset = subset[subset["mass_earth"] <= MASS_HARD_CAP]
     # Exclude physically impossible mass/radius ratios (> 100x theoretical max density)
@@ -540,6 +532,8 @@ def run(anomaly_type=None, dry_run=False):
 
 
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="Anomaly Detector")
     parser.add_argument("--type", type=str, default=None,
                         choices=["mass_radius", "ecc_period", "density"],

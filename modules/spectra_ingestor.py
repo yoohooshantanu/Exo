@@ -23,6 +23,7 @@ import re
 import uuid
 import argparse
 import math
+from utils import nv
 import time
 import requests
 import numpy as np
@@ -31,18 +32,18 @@ from io import StringIO
 from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
+from db_sync import create_sync_engine
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-DATABASE_URL     = os.environ["DATABASE_URL"]
 PIPELINE_VERSION = "1.0.0"
 NASA_TAP         = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
 FIREFLY_URL      = "https://exoplanetarchive.ipac.caltech.edu/cgi-bin/atmospheres/nph-firefly"
 
-engine       = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine       = create_sync_engine()
 SessionLocal = sessionmaker(bind=engine)
 
 DOWNLOAD_DELAY = 0.5  # seconds between file downloads (polite)
@@ -87,9 +88,11 @@ def fetch_spectra_metadata(planet_name=None, facility=None):
 
     conditions = []
     if planet_name:
-        conditions.append(f"pl_name = '{planet_name}'")
+        safe_pname = planet_name.replace("'", "''")
+        conditions.append(f"pl_name = '{safe_pname}'")
     if facility:
-        conditions.append(f"facility like '%{facility}%'")
+        safe_fac = facility.replace("'", "''")
+        conditions.append(f"facility like '%{safe_fac}%'")
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
 
@@ -270,41 +273,41 @@ def upsert_spectra(db_session, rows, run_id):
 
     spec_ids = list(set(row["spec_id"] for row in rows))
     log(f"  Deleting existing data for {len(spec_ids)} spectra...")
-    db_session.execute(
-        text("DELETE FROM atmospheric_spectra WHERE spec_id = ANY(:sids)"), 
-        {"sids": spec_ids}
-    )
+    with db_session.begin():
+        db_session.execute(
+            text("DELETE FROM atmospheric_spectra WHERE spec_id = ANY(:sids)"), 
+            {"sids": spec_ids}
+        )
+    
+        log(f"  Bulk inserting {len(rows)} data points...")
+        insert_sql = text("""
+            INSERT INTO atmospheric_spectra
+                (row_id, spec_id, planet_id, planet_name, hostname,
+                 obs_type, instrument, facility, pub_reference,
+                 wavelength_um, bandwidth_um, depth_ppm,
+                 depth_err_upper, depth_err_lower, run_id)
+            VALUES (:rid, :sid, :pid, :pn, :hn, :ot, :inst, :fac, :ref,
+                    :wl, :bw, :dp, :eu, :el, :rn)
+        """)
+    
+        params_list = []
+        for row in rows:
+            params_list.append({
+                "rid": new_id(), "sid": row["spec_id"], "pid": row.get("planet_id"),
+                "pn": row["planet_name"], "hn": row.get("hostname"),
+                "ot": row.get("obs_type"), "inst": row.get("instrument"),
+                "fac": row.get("facility"), "ref": row.get("pub_reference"),
+                "wl": row["wavelength_um"], "bw": row.get("bandwidth_um"),
+                "dp": row.get("depth_ppm"), "eu": row.get("depth_err_upper"),
+                "el": row.get("depth_err_lower"), "rn": run_id,
+            })
+    
+        chunk_size = 10000
+        for i in range(0, len(params_list), chunk_size):
+            chunk = params_list[i:i+chunk_size]
+            db_session.execute(insert_sql, chunk)
+            log(f"  Inserted {i + len(chunk)} / {len(params_list)} rows ...")
 
-    log(f"  Bulk inserting {len(rows)} data points...")
-    insert_sql = text("""
-        INSERT INTO atmospheric_spectra
-            (row_id, spec_id, planet_id, planet_name, hostname,
-             obs_type, instrument, facility, pub_reference,
-             wavelength_um, bandwidth_um, depth_ppm,
-             depth_err_upper, depth_err_lower, run_id)
-        VALUES (:rid, :sid, :pid, :pn, :hn, :ot, :inst, :fac, :ref,
-                :wl, :bw, :dp, :eu, :el, :rn)
-    """)
-
-    params_list = []
-    for row in rows:
-        params_list.append({
-            "rid": new_id(), "sid": row["spec_id"], "pid": row.get("planet_id"),
-            "pn": row["planet_name"], "hn": row.get("hostname"),
-            "ot": row.get("obs_type"), "inst": row.get("instrument"),
-            "fac": row.get("facility"), "ref": row.get("pub_reference"),
-            "wl": row["wavelength_um"], "bw": row.get("bandwidth_um"),
-            "dp": row.get("depth_ppm"), "eu": row.get("depth_err_upper"),
-            "el": row.get("depth_err_lower"), "rn": run_id,
-        })
-
-    chunk_size = 10000
-    for i in range(0, len(params_list), chunk_size):
-        chunk = params_list[i:i+chunk_size]
-        db_session.execute(insert_sql, chunk)
-        log(f"  Inserted {i + len(chunk)} / {len(params_list)} rows ...")
-
-    db_session.commit()
     return len(rows)
 
 

@@ -9,13 +9,20 @@ export interface PlanetListItem {
   eq_temperature_k?: number
   semi_major_axis_au?: number
   composite_score?: number
+  composite_score_iqr?: number
+  is_imputed?: boolean
   hz_score?: number
   cluster_name?: string
   discovery_score?: number
+  observability_index?: number
+  physical_triage_index?: number
+  characterization_index?: number
 }
 
 export interface ProfileHabitability {
   composite_score?: number
+  composite_score_iqr?: number
+  is_imputed?: boolean
   similarity_score?: number
   hz_score?: number
   teq_score?: number
@@ -40,9 +47,25 @@ export interface ProfileConfidence {
 export interface ProfileAnomalyRisk {
   anomaly_count: number
   anomaly_types: string[]
-  risk_score?: number
-  flare_score?: number
+  safety_score?: number
+  xuv_escape_score?: number
   tidal_lock_score?: number
+}
+
+export interface ParamProvenance {
+  status: 'measured' | 'derived' | 'imputed' | 'heuristic'
+  source?: string
+  uncertainty?: [number, number]
+}
+
+export interface DataProvenance {
+  radius_earth?: ParamProvenance
+  mass_earth?: ParamProvenance
+  period_days?: ParamProvenance
+  eq_temperature_k?: ParamProvenance
+  semi_major_axis_au?: ParamProvenance
+  eccentricity?: ParamProvenance
+  composite_score?: ParamProvenance
 }
 
 export interface PlanetProfileVector {
@@ -65,6 +88,9 @@ export interface PlanetProfileVector {
   distance_to_centroid?: number
   
   discovery_score: number
+  observability_index?: number
+  physical_triage_index?: number
+  characterization_index?: number
   score_breakdown: ScoreBreakdown
   
   habitability: ProfileHabitability
@@ -74,6 +100,8 @@ export interface PlanetProfileVector {
 
   system_planets: SystemPlanetItem[]
   orbital_gaps: OrbitalGapItem[]
+
+  data_provenance?: DataProvenance
 }
 
 export interface ScoreBreakdown {
@@ -82,6 +110,7 @@ export interface ScoreBreakdown {
   data_quality: number
   orbital_context: number
   anomaly_penalty: number
+  data_confidence?: number
 }
 
 export interface SystemPlanetItem {
@@ -136,6 +165,9 @@ export interface PriorityTarget {
   planet_name: string
   hostname?: string
   discovery_score: number
+  observability_index?: number
+  physical_triage_index?: number
+  characterization_index?: number
   hz_score?: number
   cluster_name?: string
   radius_earth?: number
@@ -185,6 +217,9 @@ export interface RankingItem {
   planet_name: string
   hostname?: string
   discovery_score?: number
+  observability_index?: number
+  physical_triage_index?: number
+  characterization_index?: number
   category: string
   detail?: string
 }

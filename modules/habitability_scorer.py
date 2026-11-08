@@ -9,12 +9,12 @@ Track 1: similarity_score  (Earth Similarity Index — geometric mean)
   Validates against UPR — target r >= 0.70
   What it answers: "How Earth-like is this planet physically?"
 
-Track 2: risk_score  (novel contribution — not in UPR or any public tool)
+Track 2: safety_score  (novel contribution — not in UPR or any public tool)
   Variables: flare activity, tidal locking, eccentricity, stellar age
   No public comparison benchmark exists — this is our scientific addition
-  What it answers: "How dangerous is this planet's environment for life?"
+  What it answers: "How safe is this planet's environment for life?" (higher = safer)
 
-composite_score = 0.65 * similarity_score + 0.35 * risk_score
+composite_score = 0.70 * similarity_score + 0.30 * safety_score
   Weighting: similarity is the primary filter, risk adjusts within it.
   This is the full habitability assessment — more complete than ESI alone.
 
@@ -27,37 +27,56 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text, insert, update
+from sqlalchemy import create_engine, text, update
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.dialects.postgresql import insert
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 from db.models import HabitabilityScore
 
 load_dotenv(PROJECT_ROOT / ".env")
-DATABASE_URL = os.environ["DATABASE_URL"]
-engine       = create_engine(DATABASE_URL, pool_pre_ping=True)
+from modules.db_sync import create_sync_engine
+engine       = create_sync_engine()
 Session      = sessionmaker(bind=engine)
 
-MODEL_VERSION       = "4.2.0"
+from modules.config import HABITABILITY_MODEL_VERSION as MODEL_VERSION
+from modules.utils import nv
 SIMILARITY_WEIGHT   = 0.70
-RISK_WEIGHT         = 0.30
+SAFETY_WEIGHT       = 0.30
 
-# ── Track 1: ESI exponents (Schulze-Makuch et al. 2011) ───────────────────────
-# Standard ESI uses geometric mean of four components with these weights.
-# Reference temperature = 288 K (Earth surface, UPR standard).
+# ── Track 1: ESI exponents ────────────────────────────────────────────────────
+# Source: Schulze-Makuch, D., Méndez, A., et al. (2011). "A Two-Tiered
+#         Approach to Assessing the Habitability of Exoplanets."
+#         Astrobiology, 11(10), 1041-1052. doi:10.1089/ast.2010.0592
+# Classification: LITERATURE-DERIVED
+# Methodology: Geometric mean of normalized ESI components with w_i/n.
+# Reference values: Earth = 1.0 for radius, density, escape velocity.
+# Validation: See validation/esi_benchmark.py — Spearman rho >= 0.95 vs UPR HEC.
 ESI_EXPONENTS = {
     "radius":          0.57,
     "bulk_density":    1.07,
     "escape_velocity": 0.70,
     "surface_temp":    5.58,
 }
-TEQ_REF_K = 255.0   # Earth equilibrium temperature
-# ── Track 2: Risk weights (must sum to 1.0) ───────────────────────────────────
-# flare heaviest — atmosphere stripping is the primary risk for M-dwarf HZ planets
-# tidal second — day/night dichotomy affects climate stability
+TEQ_REF_K = 255.0   # Earth equilibrium temperature (not surface temp 288 K)
+# ── Track 2: Environmental risk weights ───────────────────────────────────────
+# Classification: TRIAGE HEURISTIC — weights are hand-chosen, not fitted
+# Rationale for relative ordering:
+#   flare (0.45): Atmosphere stripping is the primary habitability risk for
+#     M-dwarf HZ planets. Vida et al. (2017), ApJ 841:124; Tilley et al.
+#     (2019), Astrobiology 19:64-86. Proxima Cen b loses ~1 bar/Gyr.
+#   tidal (0.30): Synchronous rotation creates extreme day/night gradients.
+#     Leconte et al. (2015), Science 347:632-635.
+#   ecc (0.15): High eccentricity causes extreme seasonal forcing.
+#     Williams & Pollard (2002), Int J Astrobiol 1:61-69.
+#   age (0.10): Young stars have higher UV/flare activity.
+#     Guinan & Engle (2009), IAU Symp 258:395-408.
+# WARNING: The numeric weights (0.45/0.30/0.15/0.10) encode expert judgment
+# about relative importance. They have NOT been fitted to data or validated
+# against any external benchmark.
 RISK_WEIGHTS = {
-    "flare_score":      0.45,
+    "xuv_escape_score": 0.45,
     "tidal_lock_score": 0.30,
     "ecc_score":        0.15,
     "age_score":        0.10,
@@ -69,20 +88,20 @@ assert abs(sum(RISK_WEIGHTS.values()) - 1.0) < 1e-9
 def new_id(): return str(uuid.uuid4())
 def now_utc(): return datetime.now(timezone.utc)
 
-def nv(val):
-    if val is None: return None
-    try:
-        if isinstance(val, float) and math.isnan(val): return None
-        if pd.isna(val): return None
-    except Exception: pass
-    return float(val)
 
 
 # ── Component functions ───────────────────────────────────────────────────────
 
+# HZ boundaries for a Sun-like star (conservative estimate)
+# Source: Kopparapu, R. K., et al. (2013). "Habitable Zones Around Main-
+#         Sequence Stars: New Estimates." ApJ, 765:131.
+#         doi:10.1088/0004-637X/765/2/131
+# Classification: LITERATURE-DERIVED
+# Inner = moist greenhouse limit, Outer = maximum greenhouse limit.
+# Scaled by sqrt(L/L_sun) for other stellar luminosities.
 HZ_INNER_SUN = 0.99
 HZ_OUTER_SUN = 1.70
-BOND_ALBEDO  = 0.30
+BOND_ALBEDO  = 0.30   # Earth's Bond albedo — Stephens et al. (2015), Nat Geosci 8:580
 
 def derive_teq(a_au, lum_log):
     a = nv(a_au)
@@ -117,7 +136,7 @@ def score_teq(teq_mid, delta_t=0.0):
     if base is None: return None
     return float(base * math.exp(-delta_t / 200.0))
 def score_radius(rad): return esi_component(rad,  1.0, ESI_EXPONENTS["radius"])
-def score_mass(mass):  return esi_component(mass, 1.0, 0.6302)  # kept for DB display column
+def score_mass(mass):  return esi_component(mass, 1.0, 0.6302)  # Schulze-Makuch et al. 2011 Table 1; kept for DB display, NOT used in compute_similarity_esi
 
 
 def compute_similarity_esi(radius, mass, teq):
@@ -157,6 +176,7 @@ def compute_similarity_esi(radius, mass, teq):
             available.append((raw, ESI_EXPONENTS["escape_velocity"]))
 
     if t is not None and t > 0:
+        # Schulze-Makuch 2011 compares against 288K (Earth surface temp), but pipeline uses TEQ_REF_K (255K) as a proxy
         raw = 1.0 - abs(t - TEQ_REF_K) / (t + TEQ_REF_K)
         if raw > 0:
             available.append((raw, ESI_EXPONENTS["surface_temp"]))
@@ -172,53 +192,107 @@ def compute_similarity_esi(radius, mass, teq):
     return float(prod)
 
 
-# Corrected flare table — M-dwarfs score LOW (they are dangerous)
-TEFF_TABLE = [
-    (10000, 0.05),   # O/B
-    (7500,  0.20),   # A
-    (6000,  0.60),   # F
-    (5200,  1.00),   # G  <- peak
-    (3700,  0.90),   # K
-    (2400,  0.30),   # M  <- dangerous flarers
-    (0,     0.10),   # Y/T brown dwarfs
-]
+def xuv_integral(t_gyr, t_sat_gyr):
+    t_sec = t_gyr * 1e9 * 365.25 * 24 * 3600
+    t_sat_sec = t_sat_gyr * 1e9 * 365.25 * 24 * 3600
+    if t_sec <= t_sat_sec:
+        return 1e-3 * t_sec
+    else:
+        return 1e-3 * t_sat_sec * (3.0 - 2.0 * math.sqrt(t_sat_sec / t_sec))
 
-def score_flare(teff):
-    t = nv(teff)
-    if t is None: return None
-    for i, (upper, upper_score) in enumerate(TEFF_TABLE):
-        if t >= upper:
-            if i == 0: return max(0.2, float(upper_score))
-            lower, lower_score = TEFF_TABLE[i-1]
-            frac = (t - upper) / (lower - upper)
-            return max(0.2, float(min(1.0, max(0.0, upper_score + frac * (lower_score - upper_score)))))
-    return max(0.2, float(TEFF_TABLE[-1][1]))
+def compute_mass_loss(teq, radius_earth, mass_earth, t_gyr, t_sat_gyr):
+    rp = radius_earth * 6.371e6
+    mp = mass_earth * 5.972e24
+    f_bol = 4 * 5.67e-8 * (teq ** 4)
+    integral_s = xuv_integral(t_gyr, t_sat_gyr)
+    u_xuv = f_bol * integral_s
+    delta_m = (0.1 * math.pi * (rp ** 3) * u_xuv) / (6.6743e-11 * mp)
+    return delta_m
 
+def score_xuv_escape(teq, teff, radius_earth, mass_earth, age_gyr):
+    # Classification: TRIAGE HEURISTIC (Luger & Barnes physics, but unfitted mapping)
+    # WARNING: The log_ratio mapping anchors [1, 6] are not fitted to atmospheric data.
+    # CAVEAT: For imputation-dominated planets (no measured mass, m = r**3), 
+    # R^3/M collapses to 1, causing the metric to degenerate to f(Teq, Teff).
+    teq = nv(teq); teff = nv(teff); r = nv(radius_earth); m = nv(mass_earth); age = nv(age_gyr)
+    if teq is None or teff is None:
+        return None
+        
+    # Imputation fallback if missing radius or mass
+    if m is None and r is not None:
+        m = r ** 3
+    elif r is None and m is not None:
+        r = m ** (1/3)
+    elif m is None and r is None:
+        return None
+        
+    # Saturation time
+    t_sat = 0.1 + 0.9 * (6000 - teff) / (6000 - 3000)
+    t_sat = max(0.1, min(1.5, t_sat))
+    
+    def loss_for_t(t):
+        return compute_mass_loss(teq, r, m, t, t_sat)
+        
+    if age is not None:
+        dm = loss_for_t(age)
+    else:
+        # Vectorized marginalization over 1-10 Gyr
+        t_samples = [i for i in range(1, 11)]
+        dm = sum(loss_for_t(t) for t in t_samples) / 10.0
+        
+    m_env = 1e-6 * 5.972e24 # 1 bar
+    
+    # Log rescaling for discrimination
+    log_ratio = math.log10(dm / m_env) if dm > 0 else -10
+    
+    # Map [1, 6] to [1, 0] (safe if log_ratio < 1, dangerous if log_ratio > 6)
+    # WARNING: These anchors are not fitted to data. This is not a calibrated probability.
+    score = 1.0 - (log_ratio - 1) / 5.0
+    return float(max(0.0, min(1.0, score)))
+
+# Tidal locking likelihood — sigmoid function of tidal locking timescale
+# Classification: TRIAGE HEURISTIC
+# Physical basis: tau ∝ a^6 / (M*^2 × R_p^5) — Peale (1977),
+#   "Rotation Histories of the Natural Satellites"
+# Sigmoid parameters (offset=-0.5, slope=0.5) are hand-tuned to produce:
+#   - score ≈ 0.05 for confirmed tidally locked planets (close-in M-dwarf HZ)
+#   - score ≈ 0.95 for planets well outside the tidal locking radius
+# WARNING: These sigmoid parameters are not fitted to data.
 def score_tidal_lock(a_au, mstar, rade):
     a = nv(a_au); m = nv(mstar); r = nv(rade)
-    if a is None or m is None or r is None or r <= 0: return None
-    # tau_lock proportional to a^6 / (M_*^2 * R_p^5)
+    if a is None or m is None or r is None or r <= 0:
+        return None
     tau = (a**6) / ((m**2) * (r**5))
-    if tau <= 0: return 0.2
-    # Soft penalty (sigmoid) instead of hard cutoff
+    if tau <= 0:
+        return 0.05
     log_tau = max(-10.0, math.log10(tau))
     score = 1.0 / (1.0 + math.exp(-0.5 * (log_tau + 0.5)))
-    return max(0.2, float(score))
+    return float(score)
 
+# Eccentricity penalty — Gaussian decay penalizing high-e orbits
+# Classification: TRIAGE HEURISTIC
+# Physical basis: High eccentricity causes extreme seasonal temperature
+#   variation. Williams & Pollard (2002), Int J Astrobiol 1:61-69.
+# Decay constant 2.057: e=0.3 → ~0.83, e=0.5 → ~0.60, e=0.8 → ~0.27.
+# These thresholds are hand-tuned, not fitted.
 def score_eccentricity(e):
     e = nv(e)
-    if e is None: return None
-    # Soft capped penalty
-    return float(max(0.2, math.exp(-2.057 * max(0.0, min(0.99, float(e))) ** 2)))
+    if e is None:
+        return None
+    return float(math.exp(-2.057 * max(0.0, min(0.99, float(e))) ** 2))
 
+# Stellar age → activity scoring
+# Classification: TRIAGE HEURISTIC
+# Physical basis: Stellar activity decays as t^(-1/2) — Skumanich (1972),
+#   ApJ 171:565. Young stars have higher UV flux and flare rates.
+# Guinan & Engle (2009), IAU Symp 258:395-408.
 def score_age(age):
     a = nv(age)
-    if a is None or a <= 0: return None
+    if a is None or a <= 0:
+        return None
     activity = a ** -0.5
     activity = min(max(activity, 0.2), 3.0)
-    # Map activity 0.2 (safe) to 1.0, and 3.0 (dangerous) to 0.1
-    # Capped soft penalty
-    return float(max(0.2, 1.0 - (activity - 0.2) / 2.8 * 0.9))
+    return float(max(0.0, 1.0 - (activity - 0.2) / 2.8 * 0.9))
 
 def load_uncertainties():
     from pathlib import Path
@@ -257,7 +331,7 @@ def weighted_average(scores: dict, weights: dict) -> float | None:
     return float(min(1.0, max(0.0, wsum / total_w)))
 
 
-def score_planet(row: pd.Series) -> dict:
+def _compute_score_planet(row: pd.Series) -> dict:
     a_au    = nv(row.get("semi_major_axis_au"))
     lum_log = nv(row.get("luminosity_solar"))
     period  = nv(row.get("period_days"))
@@ -270,17 +344,14 @@ def score_planet(row: pd.Series) -> dict:
     age     = nv(row.get("age_gaia_gyr")) or nv(row.get("age_nasa_gyr"))
 
     # ── Track 1: Similarity (ESI-based) ────────────────────────────────────────
-    # Filter implausible mass values (likely upper limits, not real measurements)
-    # Mass-radius relation: rocky planets M ~ R^3.7, max reasonable ~ 10*R^2.5
     masse_for_esi = masse
     if masse is not None and rade is not None and rade > 0:
-        max_plausible = 10.0 * (rade ** 2.5)  # generous upper bound
+        max_plausible = 10.0 * (rade ** 2.5)
         if masse > max_plausible:
-            masse_for_esi = None  # treat as unmeasured
+            masse_for_esi = None
     teq_mid = teq
     delta_t = 0.0
 
-    # Density Check
     rho = None
     if masse is not None and rade is not None and rade > 0:
         rho = masse / (rade ** 3)
@@ -292,21 +363,20 @@ def score_planet(row: pd.Series) -> dict:
 
     sim_score = compute_similarity_esi(rade, masse_for_esi, teq_mid)
 
-    # ── Track 2: Risk (higher = safer, i.e. lower risk) ───────────────────────
-    # ── Track 2: Risk (higher = safer, i.e. lower risk) ───────────────────────
-    risk = {
-        "flare_score":      score_flare(teff),
+    # ── Track 2: Environmental safety (higher = safer) ───────────────────────
+    safety = {
+        "xuv_escape_score": score_xuv_escape(teq, teff, rade, masse, age),
         "tidal_lock_score": score_tidal_lock(a_au, mstar, rade),
         "ecc_score":        score_eccentricity(ecc),
-        "age_score":        score_age(age) if age else score_flare(teff), # fallback to flare if no age
+        "age_score":        score_age(age) if age is not None else None,
     }
-    risk_score = weighted_average(risk, RISK_WEIGHTS)
+    safety_score = weighted_average(safety, RISK_WEIGHTS)
 
     # ── Composite ─────────────────────────────────────────────────────────────
-    if sim_score is not None and risk_score is not None:
-        composite = SIMILARITY_WEIGHT * sim_score + RISK_WEIGHT * risk_score
+    if sim_score is not None and safety_score is not None:
+        composite = SIMILARITY_WEIGHT * sim_score + SAFETY_WEIGHT * safety_score
     elif sim_score is not None:
-        composite = sim_score  # risk unknown, use similarity only
+        composite = sim_score
     else:
         composite = None
         
@@ -314,10 +384,9 @@ def score_planet(row: pd.Series) -> dict:
         composite = round(max(0.0, min(1.0, composite)), 4)
     if sim_score is not None:
         sim_score = max(0.0, min(1.0, sim_score))
-    if risk_score is not None:
-        risk_score = max(0.0, min(1.0, risk_score))
+    if safety_score is not None:
+        safety_score = max(0.0, min(1.0, safety_score))
 
-    # ESI sub-components for snapshot
     esi_detail = {}
     if rade is not None and rade > 0:
         esi_detail["radius_esi"] = round(esi_component(rade, 1.0, ESI_EXPONENTS["radius"]), 4)
@@ -333,35 +402,72 @@ def score_planet(row: pd.Series) -> dict:
         "model":      MODEL_VERSION,
         "method":     "geometric_esi",
         "sim_weight": SIMILARITY_WEIGHT,
-        "risk_weight": RISK_WEIGHT,
+        "risk_weight": SAFETY_WEIGHT,
         "inputs": {
             "a_au": a_au, "lum_log": lum_log, "period_days": period,
             "mstar": mstar, "teff_k": teff, "eccentricity": ecc,
             "radius_earth": rade, "mass_earth": masse, "teq_k": teq, "age_gyr": age,
         },
         "esi_components": esi_detail,
-        "risk":        {k: round(v, 4) if v else None for k, v in risk.items()},
+        "safety":      {k: round(v, 4) if v else None for k, v in safety.items()},
         "sim_score":   round(sim_score, 4) if sim_score else None,
-        "risk_score":  round(risk_score, 4) if risk_score else None,
+        "safety_score": round(safety_score, 4) if safety_score else None,
     }
 
     return {
         "composite_score":    composite,
-        # individual display scores (stored in DB columns)
         "hz_score":           hz_val,
         "teq_score":          teq_val,
         "radius_esi_score":   rad_val,
         "mass_esi_score":     mass_val,
-        # risk track
-        "tidal_lock_score":   risk["tidal_lock_score"],
-        "flare_score":        risk["flare_score"],
-        "eccentricity_score": risk["ecc_score"],
-        "age_score":          risk["age_score"],
-        # sub-totals
+        "tidal_lock_score":   safety["tidal_lock_score"],
+        "xuv_escape_score":   safety["xuv_escape_score"],
+        "eccentricity_score": safety["ecc_score"],
+        "age_score":          safety["age_score"],
         "similarity_score":   sim_score,
-        "risk_score":         risk_score,
+        "safety_score":       safety_score,
         "input_snapshot":     json.dumps(snapshot),
     }
+
+
+def score_planet(row: pd.Series) -> dict:
+    base = _compute_score_planet(row)
+    
+    masse = nv(row.get("mass_earth"))
+    rade  = nv(row.get("radius_earth"))
+    is_imputed = (masse is None and rade is not None)
+
+    base["is_imputed"] = is_imputed
+    base["composite_score_iqr"] = None
+
+    if base["composite_score"] is not None:
+        pname = row.get("planet_name")
+        errs = UNCERTAINTIES.get(pname, {})
+        m_err = errs.get("m_err", 0.0)
+        r_err = errs.get("r_err", 0.0)
+        
+        import numpy as np
+        rng = np.random.default_rng(42)
+        r_sigma = r_err if r_err > 0 else (abs(rade * 0.30) if rade else 0)
+        m_sigma = m_err if m_err > 0 else (abs(masse * 0.30) if masse else 0)
+        
+        if r_sigma > 0 or m_sigma > 0 or is_imputed:
+            draws = []
+            for _ in range(30): # fewer draws for speed on full DB
+                perturbed = pd.Series(row.to_dict())
+                if rade is not None and r_sigma > 0:
+                    perturbed["radius_earth"] = max(0.01, rng.normal(rade, r_sigma))
+                if masse is not None and m_sigma > 0 and not is_imputed:
+                    perturbed["mass_earth"] = max(0.01, rng.normal(masse, m_sigma))
+                # if is_imputed, mass is None so _compute_score_planet will impute it from the drawn radius
+                res = _compute_score_planet(perturbed)
+                if res["composite_score"] is not None:
+                    draws.append(res["composite_score"])
+            if draws:
+                q25, q75 = np.percentile(draws, [25, 75])
+                base["composite_score_iqr"] = round(q75 - q25, 4)
+
+    return base
 
 
 def fetch_planets(session) -> pd.DataFrame:
@@ -409,45 +515,56 @@ def write_scores(session, scored: list, run_at: datetime) -> int:
     """), {"ver": MODEL_VERSION}).fetchall()
     existing_map = {str(pid): str(sid) for pid, sid in existing}
 
-    insert_dicts = []
-    update_dicts = []
-
+    rows_to_save = []
     for row in scored:
         pid = str(row["planet_id"])
-        sid = existing_map.get(pid)
+        sid = existing_map.get(pid) or new_id()
 
-        d = {
+        rows_to_save.append({
+            "score_id": sid,
             "planet_id": pid,
             "model_version": MODEL_VERSION,
             "composite_score": row.get("composite_score"),
+            "composite_score_iqr": row.get("composite_score_iqr"),
+            "is_imputed": row.get("is_imputed", False),
             "hz_score": row.get("hz_score"),
             "teq_score": row.get("teq_score"),
             "radius_esi_score": row.get("radius_esi_score"),
             "mass_esi_score": row.get("mass_esi_score"),
             "tidal_lock_score": row.get("tidal_lock_score"),
-            "flare_score": row.get("flare_score"),
+            "xuv_escape_score": row.get("xuv_escape_score"),
             "eccentricity_score": row.get("eccentricity_score"),
             "age_score": row.get("age_score"),
             "input_snapshot": row.get("input_snapshot"),
             "scored_at": run_at,
-        }
+        })
 
-        if sid:
-            d["score_id"] = sid
-            update_dicts.append(d)
-        else:
-            d["score_id"] = new_id()
-            insert_dicts.append(d)
-
-    chunk_size = 2000
-    for i in range(0, len(insert_dicts), chunk_size):
-        session.execute(insert(HabitabilityScore), insert_dicts[i:i+chunk_size])
-
-    for i in range(0, len(update_dicts), chunk_size):
-        session.execute(update(HabitabilityScore), update_dicts[i:i+chunk_size])
+    chunk_size = 1000
+    for i in range(0, len(rows_to_save), chunk_size):
+        chunk = rows_to_save[i:i+chunk_size]
+        stmt = insert(HabitabilityScore).values(chunk)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=['planet_id', 'model_version'],
+            set_={
+                "composite_score": stmt.excluded.composite_score,
+                "composite_score_iqr": stmt.excluded.composite_score_iqr,
+                "is_imputed": stmt.excluded.is_imputed,
+                "hz_score": stmt.excluded.hz_score,
+                "teq_score": stmt.excluded.teq_score,
+                "radius_esi_score": stmt.excluded.radius_esi_score,
+                "mass_esi_score": stmt.excluded.mass_esi_score,
+                "tidal_lock_score": stmt.excluded.tidal_lock_score,
+                "xuv_escape_score": stmt.excluded.xuv_escape_score,
+                "eccentricity_score": stmt.excluded.eccentricity_score,
+                "age_score": stmt.excluded.age_score,
+                "input_snapshot": stmt.excluded.input_snapshot,
+                "scored_at": stmt.excluded.scored_at,
+            }
+        )
+        session.execute(stmt)
 
     session.commit()
-    return len(insert_dicts) + len(update_dicts)
+    return len(rows_to_save)
 
 
 def run_upr_validation(session) -> dict:
@@ -544,8 +661,8 @@ def run():
 
     print(f"\nHabitability Scorer v{MODEL_VERSION} -- Geometric ESI + Risk")
     print(f"  Similarity: geometric mean ESI (radius, density, vesc, Teq)")
-    print(f"  Risk factors:           {list(RISK_WEIGHTS.keys())}")
-    print(f"  Composite = {SIMILARITY_WEIGHT} x similarity + {RISK_WEIGHT} x risk")
+    print(f"  Safety factors:         {list(RISK_WEIGHTS.keys())}")
+    print(f"  Composite = {SIMILARITY_WEIGHT} x similarity + {SAFETY_WEIGHT} x safety")
     print("=" * 60)
 
     print("\nLoading planet data ...")
@@ -570,23 +687,23 @@ def run():
     # stats
     comp = [s["composite_score"] for s in scored if s["composite_score"] is not None]
     sim  = [s["similarity_score"] for s in scored if s.get("similarity_score") is not None]
-    risk = [s["risk_score"] for s in scored if s.get("risk_score") is not None]
+    safety_vals = [s["safety_score"] for s in scored if s.get("safety_score") is not None]
 
     print(f"\n-- Score distributions -------------------------------------------")
     print(f"  {'':25} {'mean':>6} {'median':>8} {'max':>6}")
     print(f"  {'composite_score':<25} {np.mean(comp):>6.3f} {np.median(comp):>8.3f} {max(comp):>6.3f}")
     print(f"  {'similarity_score':<25} {np.mean(sim):>6.3f} {np.median(sim):>8.3f} {max(sim):>6.3f}")
-    print(f"  {'risk_score':<25} {np.mean(risk):>6.3f} {np.median(risk):>8.3f} {max(risk):>6.3f}")
+    print(f"  {'safety_score':<25} {np.mean(safety_vals):>6.3f} {np.median(safety_vals):>8.3f} {max(safety_vals):>6.3f}")
 
     top = sorted(scored, key=lambda x: x.get("composite_score") or 0, reverse=True)[:20]
     print(f"\n-- Top 20 by composite -------------------------------------------")
-    print(f"  {'Planet':<28} {'Comp':>6} {'Sim':>6} {'Risk':>6} {'Teq':>5} {'Fla':>5}")
+    print(f"  {'Planet':<28} {'Comp':>6} {'Sim':>6} {'Safe':>6} {'Teq':>5} {'Fla':>5}")
     print(f"  {'---'*10} {'---'*2} {'---'*2} {'---'*2} {'--'*3} {'--'*3}")
     for s in top:
         f = lambda v: f"{v:.2f}" if v is not None else " -- "
         print(f"  {s['planet_name']:<28} {f(s['composite_score']):>6} "
-              f"{f(s.get('similarity_score')):>6} {f(s.get('risk_score')):>6} "
-              f"{f(s['teq_score']):>5} {f(s['flare_score']):>5}")
+              f"{f(s.get('similarity_score')):>6} {f(s.get('safety_score')):>6} "
+              f"{f(s['teq_score']):>5} {f(s['xuv_escape_score']):>5}")
 
     print(f"\n-- UPR Validation (similarity track only) ------------------------")
     result = run_upr_validation(session)

@@ -1,22 +1,66 @@
 """FastAPI gateway for the Exoplanet Discovery Platform."""
+import asyncio
+import json
 import math
 import os
+from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, Depends, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
+import csv
+import io
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.ext.asyncio import AsyncSession
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.db import get_db
 from api import queries as q
+from api.db import AsyncSessionLocal, get_db
 from api.models import (
-    PlanetListItem, PlanetProfileVector, ProfileHabitability, ProfileBiosignatures, ProfileConfidence, ProfileAnomalyRisk, StarItem,
-    SpectrumView, SpectrumPoint, MoleculeDetectionItem, HitranLineItem,
-    RankingItem, AlertItem, PlatformStats, PaginatedResponse,
-    StarPositionItem, StarPositionsResponse, PriorityTarget,
-    SystemPlanet, StarSystemResponse, AtmosphericRetrievalItem
+    AlertItem,
+    AtmosphericRetrievalItem,
+    HitranLineItem,
+    MoleculeDetectionItem,
+    OrbitalGapItem,
+    PaginatedResponse,
+    PlanetListItem,
+    PlanetProfileVector,
+    PlatformStats,
+    PriorityTarget,
+    ProfileAnomalyRisk,
+    ProfileBiosignatures,
+    ProfileConfidence,
+    ProfileHabitability,
+    RankingItem,
+    ScoreBreakdown,
+    SpectrumPoint,
+    SpectrumView,
+    StarItem,
+    StarPositionItem,
+    StarPositionsResponse,
+    StarSystemResponse,
+    SystemPlanet,
+    SystemPlanetItem,
+    DataProvenance,
+    ParamProvenance,
 )
+from modules.config import (
+    HABITABILITY_MODEL_VERSION as SCORE_VERSION,
+)
+from modules.config import (
+    ORBITAL_MODEL_VERSION as PRED_VERSION,
+)
+from modules.config import (
+    PROJECT_ROOT,
+    RETRIEVAL_OUTPUT_DIR,
+)
+from modules.platon_retrieval import new_id
+from modules.discovery_score import compute_data_quality_component
+
+limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
     title="Exoplanet Discovery Platform API",
@@ -24,23 +68,63 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS for local dev
+
+def _cors_origins() -> list[str]:
+    raw = os.environ.get(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://localhost:3000",
+    )
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "https://exo-gudeg8rer-piroshadows-projects.vercel.app"
-    ],
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_origins=_cors_origins(),
+    allow_origin_regex=os.environ.get("CORS_ORIGIN_REGEX", r"https://.*\.vercel\.app"),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-SCORE_VERSION = "4.2.0"
-PRED_VERSION = "3.1.0"
+
+def _safe_posterior_path(path: str) -> Path:
+    """Only serve posterior files stored under the configured retrieval output dir."""
+    if not path:
+        raise HTTPException(status_code=404, detail="Posterior file not found")
+
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        candidate = (PROJECT_ROOT / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+
+    allowed_root = RETRIEVAL_OUTPUT_DIR.resolve()
+    try:
+        candidate.relative_to(allowed_root)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Invalid posterior file path")
+
+    if not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Posterior file not found")
+    return candidate
+
+
+def _enqueue_retrieval(planet_id: str, spec_id: str, retrieval_id: str) -> str:
+    """Queue a PLATON retrieval via Celery when available, else run inline."""
+    try:
+        from pipe.celery_worker import app as celery_app
+        celery_app.send_task(
+            "run_platon_retrieval_task",
+            args=[planet_id, spec_id, retrieval_id],
+        )
+        return "celery"
+    except Exception:
+        from modules.platon_retrieval import run_platon_retrieval
+        run_platon_retrieval(planet_id, spec_id, retrieval_id)
+        return "inline"
 
 
 # ── Health ───────────────────────────────────────────────────────────────────
@@ -53,7 +137,8 @@ async def health():
 # ── Platform Stats ───────────────────────────────────────────────────────────
 
 @app.get("/api/stats", response_model=PlatformStats)
-async def get_stats(session: AsyncSession = Depends(get_db)):
+@limiter.limit("60/minute")
+async def get_stats(request: Request, session: AsyncSession = Depends(get_db)):
     row = (await session.execute(
         q.PLATFORM_STATS,
         {"score_version": SCORE_VERSION, "pred_version": PRED_VERSION}
@@ -61,16 +146,37 @@ async def get_stats(session: AsyncSession = Depends(get_db)):
     return PlatformStats(**row)
 
 
+@app.get("/api/taxonomy-stats")
+async def get_taxonomy_stats(session: AsyncSession = Depends(get_db)):
+    rows = (await session.execute(text("""
+        SELECT 
+            CASE 
+                WHEN tc.cluster_label = -1 THEN 'Noise/Novel'
+                ELSE COALESCE(tc.cluster_name, 'Unknown')
+            END AS cluster_label, 
+            COUNT(*) AS count
+        FROM taxonomy_clusters tc
+        JOIN planets p ON tc.planet_id = p.planet_id
+        WHERE p.status = 'confirmed'
+        GROUP BY tc.cluster_label, tc.cluster_name
+        ORDER BY count DESC
+    """))).mappings().all()
+    return [dict(r) for r in rows]
+
+
 # ── Planets Catalog ──────────────────────────────────────────────────────────
 
 @app.get("/api/planets", response_model=PaginatedResponse)
+@limiter.limit("60/minute")
 async def list_planets(
+    request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
     method: Optional[str] = None,
     year_min: Optional[int] = None,
     year_max: Optional[int] = None,
     min_score: Optional[float] = None,
+    search: Optional[str] = None,
     session: AsyncSession = Depends(get_db),
 ):
     offset = (page - 1) * page_size
@@ -83,6 +189,7 @@ async def list_planets(
             "year_min": year_min,
             "year_max": year_max,
             "min_score": min_score,
+            "search": search,
         }
     )).scalar()
 
@@ -94,6 +201,7 @@ async def list_planets(
             "year_min": year_min,
             "year_max": year_max,
             "min_score": min_score,
+            "search": search,
             "limit": page_size,
             "offset": offset,
         }
@@ -111,8 +219,55 @@ async def list_planets(
     )
 
 
+@app.get("/api/export/planets")
+@limiter.limit("5/minute")
+async def export_planets(
+    request: Request,
+    method: Optional[str] = None,
+    year_min: Optional[int] = None,
+    year_max: Optional[int] = None,
+    min_score: Optional[float] = None,
+    search: Optional[str] = None,
+    session: AsyncSession = Depends(get_db),
+):
+    rows = (await session.execute(
+        q.CSV_EXPORT,
+        {
+            "score_version": SCORE_VERSION,
+            "method": method,
+            "year_min": year_min,
+            "year_max": year_max,
+            "min_score": min_score,
+            "search": search,
+        }
+    )).mappings().all()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="No planets found matching criteria")
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Write header
+    headers = list(rows[0].keys())
+    writer.writerow(headers)
+    
+    # Write rows
+    for row in rows:
+        writer.writerow([row[h] for h in headers])
+        
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]), 
+        media_type="text/csv", 
+        headers={"Content-Disposition": "attachment; filename=exo_planets_export.csv"}
+    )
+
+
+
 @app.get("/api/planets/{planet_name}", response_model=PlanetProfileVector)
-async def get_planet(planet_name: str, session: AsyncSession = Depends(get_db)):
+@limiter.limit("20/minute")
+async def get_planet(request: Request, planet_name: str, session: AsyncSession = Depends(get_db)):
     # Main detail
     row = (await session.execute(
         q.PLANET_DETAIL,
@@ -120,25 +275,28 @@ async def get_planet(planet_name: str, session: AsyncSession = Depends(get_db)):
     )).mappings().one_or_none()
 
     if not row:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Planet not found")
 
     d = dict(row)
 
-    # Run sub-queries concurrently to solve the N+1 latency bottleneck
-    import asyncio
-    from .db import AsyncSessionLocal
-
     async def fetch_all(query, params):
-        async with AsyncSessionLocal() as s:
-            return (await s.execute(query, params)).mappings().all()
+        return (await session.execute(query, params)).mappings().all()
 
-    a_rows, b_rows, specs, sys_planets_rows, sys_gaps_rows = await asyncio.gather(
+    a_rows, b_rows, specs, sys_planets_rows, sys_gaps_rows, prov_rows = await asyncio.gather(
         fetch_all(q.PLANET_ANOMALIES, {"planet_name": planet_name}),
         fetch_all(q.PLANET_BIOSIGS, {"planet_name": planet_name}),
         fetch_all(q.SPECTRA_FOR_PLANET, {"planet_name": planet_name}),
         fetch_all(q.SYSTEM_PLANETS, {"planet_name": planet_name}),
-        fetch_all(q.PLANET_GAPS, {"planet_name": planet_name, "pred_version": "3.1.0"})
+        fetch_all(q.PLANET_GAPS, {"planet_name": planet_name, "pred_version": PRED_VERSION}),
+        fetch_all(text("""
+            SELECT pp.param_name, pp.uncertainty_upper, pp.uncertainty_lower, pp.is_imputed,
+                   ir.source AS run_source, pa.doi, pa.title AS paper_title
+            FROM planet_parameters pp
+            JOIN ingestion_runs ir ON pp.run_id = ir.run_id
+            LEFT JOIN papers pa ON pp.paper_id = pa.paper_id
+            WHERE pp.planet_id = (SELECT planet_id FROM planets WHERE planet_name = :planet_name)
+              AND pp.is_default = true AND pp.valid_to IS NULL
+        """), {"planet_name": planet_name}),
     )
 
     # Anomalies
@@ -156,7 +314,7 @@ async def get_planet(planet_name: str, session: AsyncSession = Depends(get_db)):
     data_completeness = (known_params / 5.0) * 100.0
 
     has_spectra = len(specs) > 0
-    
+
     inst_best = None
     if has_spectra:
         for s in specs:
@@ -169,64 +327,63 @@ async def get_planet(planet_name: str, session: AsyncSession = Depends(get_db)):
             inst_best = specs[0].get("facility")
 
     # Fetch System Architecture
-    from .models import SystemPlanetItem, OrbitalGapItem
     system_planets = [SystemPlanetItem(**dict(r)) for r in sys_planets_rows]
     orbital_gaps = [OrbitalGapItem(**dict(r)) for r in sys_gaps_rows]
 
     habitability = ProfileHabitability(
         composite_score=d.get("composite_score"),
+        composite_score_iqr=d.get("composite_score_iqr"),
+        is_imputed=d.get("is_imputed", False),
         similarity_score=d.get("similarity_score"),
         hz_score=d.get("hz_score"),
         teq_score=d.get("teq_score"),
         radius_esi_score=d.get("radius_esi_score"),
-        mass_esi_score=d.get("mass_esi_score")
+        mass_esi_score=d.get("mass_esi_score"),
+        eccentricity_score=d.get("eccentricity_score"),
+        age_score=d.get("age_score"),
     )
-    
+
     biosignatures = ProfileBiosignatures(
         biosig_count=biosig_count,
         molecules=molecules,
         max_sigma=max_sigma
     )
-    
+
     confidence = ProfileConfidence(
         has_spectra=has_spectra,
         data_completeness=data_completeness,
         instrument_best=inst_best
     )
-    
+
     anomaly_risk = ProfileAnomalyRisk(
         anomaly_count=anomaly_count,
         anomaly_types=anomaly_types,
-        risk_score=d.get("risk_score"),
-        flare_score=d.get("flare_score"),
+        safety_score=d.get("safety_score"),
+        xuv_escape_score=d.get("xuv_escape_score"),
         tidal_lock_score=d.get("tidal_lock_score")
     )
 
     # ── Compute Unified Discovery Score Breakdown (matching SQL) ─────────
-    from .models import ScoreBreakdown
-
-    # 1. Habitability component (SQL: COALESCE(hs.composite_score, 0) * 40)
     hab_raw = d.get("composite_score") or 0.0
     hab_component = round(hab_raw * 40, 2)
 
-    # 2. Biosignature component (SQL: LEAST(count_sigma_gt_3 * 5.0, 25))
-    confirmed_mols = sum(1 for r in b_rows if r.get("detection_sigma", 0) >= 3.0)
-    biosig_component = min(confirmed_mols * 5.0, 25.0)
+    confirmed_mols = [r for r in b_rows if (r.get("detection_sigma") or 0) >= 3.0]
+    n_mols = len(confirmed_mols)
+    if n_mols > 0:
+        avg_sigma = sum(r.get("detection_sigma", 3.0) for r in confirmed_mols) / n_mols
+        avg_sigma = min(avg_sigma, 10.0)
+        biosig_component = min(n_mols * 5.0 * (0.5 + 0.5 * avg_sigma / 5.0), 25.0)
+    else:
+        biosig_component = 0.0
 
-    # 3. Data quality component (SQL: spectra existence + parameter count)
-    # Note: planet_parameters count is fetched as data_completeness count in SQL.
-    spectra_pts = 7.0 if has_spectra else 0.0
-    # SQL uses all populated planet_parameters. We approximate it with known_params in the Python layer for the breakdown.
-    data_component = spectra_pts + (known_params * 1.0)
+    data_component = compute_data_quality_component(has_spectra, inst_best, known_params)
 
-    # 4. Orbital context component (SQL: sibling count * 1.5)
     n_siblings = len(sys_planets_rows)
-    orbital_component = min(n_siblings * 1.5, 10.0)
+    n_gaps = len(sys_gaps_rows)
+    orbital_component = min(n_siblings * 1.5 + n_gaps * 2.0, 10.0)
 
-    # 5. Anomaly penalty (SQL: min(anomaly_count * 3.0, 10))
     anomaly_penalty = -min(anomaly_count * 3.0, 10.0)
 
-    # Use the EXACT score computed by the DB for consistency
     discovery_score = float(d.get("discovery_score") or 0.0)
 
     score_breakdown = ScoreBreakdown(
@@ -234,8 +391,37 @@ async def get_planet(planet_name: str, session: AsyncSession = Depends(get_db)):
         biosignature=biosig_component,
         data_quality=data_component,
         orbital_context=orbital_component,
-        anomaly_penalty=anomaly_penalty
+        anomaly_penalty=anomaly_penalty,
+        data_confidence=round(data_completeness, 2),
     )
+
+    # ── Provenance metadata ──────────────────────────────────────────────
+    prov_map = {r["param_name"]: r for r in prov_rows}
+    CORE_PARAM_NAMES = ["radius_earth", "mass_earth", "period_days",
+                        "eq_temperature_k", "semi_major_axis_au", "eccentricity"]
+    prov_dict = {}
+    for pname in CORE_PARAM_NAMES:
+        if pname in prov_map:
+            pr = prov_map[pname]
+            has_unc = pr.get("uncertainty_upper") is not None
+            source_label = pr.get("run_source") or "unknown"
+            if pr.get("doi"):
+                source_label = f"{source_label} (DOI: {pr['doi']})"
+            unc = None
+            if has_unc:
+                unc = [pr.get("uncertainty_lower") or 0, pr["uncertainty_upper"]]
+            prov_dict[pname] = ParamProvenance(
+                status="imputed" if pr.get("is_imputed") else "measured",
+                source=source_label,
+                uncertainty=unc,
+            )
+        elif d.get(pname) is not None and pname == "density_earth":
+            prov_dict[pname] = ParamProvenance(status="derived", source="Computed from mass and radius")
+    prov_dict["composite_score"] = ParamProvenance(
+        status="heuristic",
+        source=f"Two-track habitability model v{SCORE_VERSION}",
+    )
+    data_provenance = DataProvenance(**prov_dict)
 
     return PlanetProfileVector(
         planet_name=d["planet_name"],
@@ -256,26 +442,30 @@ async def get_planet(planet_name: str, session: AsyncSession = Depends(get_db)):
         cluster_name=d.get("cluster_name"),
         distance_to_centroid=d.get("distance_to_centroid"),
         discovery_score=discovery_score,
+        observability_index=d.get("observability_index"),
+        physical_triage_index=d.get("physical_triage_index"),
+        characterization_index=d.get("characterization_index"),
         score_breakdown=score_breakdown,
         habitability=habitability,
         biosignatures=biosignatures,
         confidence=confidence,
         anomaly_risk=anomaly_risk,
         system_planets=system_planets,
-        orbital_gaps=orbital_gaps
+        orbital_gaps=orbital_gaps,
+        data_provenance=data_provenance,
     )
 
 
 # ── Spectrum ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/planets/{planet_name}/spectrum", response_model=SpectrumView)
-async def get_spectrum(planet_name: str, session: AsyncSession = Depends(get_db)):
+@limiter.limit("20/minute")
+async def get_spectrum(request: Request, planet_name: str, session: AsyncSession = Depends(get_db)):
     specs = (await session.execute(
         q.SPECTRA_FOR_PLANET, {"planet_name": planet_name}
     )).mappings().all()
 
     if not specs:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="No spectra found")
 
     spec = specs[0]
@@ -334,7 +524,9 @@ async def list_stars(
 # ── Star Positions (3D Map) ──────────────────────────────────────────────────
 
 @app.get("/api/stars/positions", response_model=StarPositionsResponse)
+@limiter.limit("20/minute")
 async def get_star_positions(
+    request: Request,
     limit: int = Query(6224, ge=1, le=10000),
     session: AsyncSession = Depends(get_db),
 ):
@@ -377,8 +569,6 @@ async def get_star_positions(
 
 @app.get("/api/stars/{star_id}/system", response_model=StarSystemResponse)
 async def get_star_system(star_id: str, session: AsyncSession = Depends(get_db)):
-    from fastapi import HTTPException
-
     row = (await session.execute(
         q.STAR_SYSTEM,
         {"star_id": star_id}
@@ -411,8 +601,6 @@ async def get_star_system(star_id: str, session: AsyncSession = Depends(get_db))
 
 @app.get("/api/priority-target", response_model=PriorityTarget)
 async def get_priority_target(session: AsyncSession = Depends(get_db)):
-    from fastapi import HTTPException
-
     row = (await session.execute(
         q.PRIORITY_TARGET,
         {"score_version": SCORE_VERSION}
@@ -484,48 +672,6 @@ async def get_alerts(
 
 # ── Atmospheric Retrievals ───────────────────────────────────────────────────
 
-from fastapi import BackgroundTasks
-from modules.platon_retrieval import new_id
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from pipe.celery_worker import run_platon_retrieval_task
-
-@app.post("/api/planets/{planet_name}/spectra/{spec_id}/retrieve", response_model=AtmosphericRetrievalItem)
-async def start_retrieval(
-    planet_name: str,
-    spec_id: str,
-    background_tasks: BackgroundTasks,
-    session: AsyncSession = Depends(get_db),
-):
-    # Find planet_id
-    planet = (await session.execute(
-        text("SELECT planet_id FROM planets WHERE planet_name = :pname"),
-        {"pname": planet_name}
-    )).fetchone()
-    
-    if not planet:
-        raise HTTPException(status_code=404, detail="Planet not found")
-        
-    planet_id = planet[0]
-    retrieval_id = new_id()
-    
-    # Create record
-    await session.execute(text("""
-        INSERT INTO atmospheric_retrievals (retrieval_id, planet_id, spec_id, model_name, status)
-        VALUES (:rid, :pid, :sid, 'PLATON_dynesty', 'running')
-    """), {"rid": retrieval_id, "pid": planet_id, "sid": spec_id})
-    await session.commit()
-    
-    run_platon_retrieval_task.delay(str(planet_id), str(spec_id), str(retrieval_id))
-    
-    return AtmosphericRetrievalItem(
-        retrieval_id=retrieval_id,
-        spec_id=spec_id,
-        model_name='PLATON_dynesty',
-        status='running'
-    )
-
 @app.get("/api/planets/{planet_name}/spectra/{spec_id}/retrievals", response_model=List[AtmosphericRetrievalItem])
 async def get_retrievals(
     planet_name: str,
@@ -539,8 +685,74 @@ async def get_retrievals(
         WHERE p.planet_name = :pname AND r.spec_id = :sid
         ORDER BY r.created_at DESC
     """), {"pname": planet_name, "sid": spec_id})).mappings().all()
-    
+
     return [AtmosphericRetrievalItem(**{**dict(r), "retrieval_id": str(r["retrieval_id"]), "spec_id": str(r["spec_id"])}) for r in rows]
+
+
+@app.post(
+    "/api/planets/{planet_name}/spectra/{spec_id}/retrieve",
+    response_model=AtmosphericRetrievalItem,
+    status_code=202,
+)
+@limiter.limit("5/hour")
+async def start_retrieval(
+    request: Request,
+    planet_name: str,
+    spec_id: str,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_db),
+):
+    """Queue a PLATON atmospheric retrieval for a validated planet/spectrum pair."""
+    row = (await session.execute(text("""
+        SELECT p.planet_id::text
+        FROM planets p
+        JOIN atmospheric_spectra a ON a.planet_id = p.planet_id
+        WHERE p.planet_name = :pname AND a.spec_id = :sid
+        LIMIT 1
+    """), {"pname": planet_name, "sid": spec_id})).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Planet or spectrum not found")
+
+    planet_id = row[0]
+
+    running = (await session.execute(text("""
+        SELECT retrieval_id::text, created_at
+        FROM atmospheric_retrievals
+        WHERE planet_id = :pid AND spec_id = :sid AND status = 'running'
+        ORDER BY created_at DESC
+        LIMIT 1
+    """), {"pid": planet_id, "sid": spec_id})).mappings().one_or_none()
+
+    if running:
+        raise HTTPException(status_code=409, detail="Retrieval already in progress")
+
+    retrieval_id = new_id()
+    await session.execute(text("""
+        INSERT INTO atmospheric_retrievals (
+            retrieval_id, planet_id, spec_id, model_name, status
+        ) VALUES (
+            :rid, :pid, :sid, 'PLATON_v1', 'running'
+        )
+    """), {"rid": retrieval_id, "pid": planet_id, "sid": spec_id})
+    await session.commit()
+
+    def _run_retrieval():
+        _enqueue_retrieval(planet_id, spec_id, retrieval_id)
+
+    background_tasks.add_task(_run_retrieval)
+
+    created = (await session.execute(text("""
+        SELECT *
+        FROM atmospheric_retrievals
+        WHERE retrieval_id = :rid
+    """), {"rid": retrieval_id})).mappings().one()
+
+    item = dict(created)
+    item["retrieval_id"] = str(item["retrieval_id"])
+    item["spec_id"] = str(item["spec_id"])
+    return AtmosphericRetrievalItem(**item)
+
 
 @app.get("/api/retrievals/{retrieval_id}/posterior")
 async def get_retrieval_posterior(
@@ -551,17 +763,18 @@ async def get_retrieval_posterior(
         SELECT posterior_file FROM atmospheric_retrievals
         WHERE retrieval_id = :rid
     """), {"rid": retrieval_id})).fetchone()
-    
+
     if not row or not row[0]:
         raise HTTPException(status_code=404, detail="Posterior file not found")
-        
-    import json
+
+    posterior_path = _safe_posterior_path(row[0])
     try:
-        with open(row[0], 'r') as f:
-            data = json.load(f)
-        return data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        with open(posterior_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Posterior file is not valid JSON")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ── Validation Metrics ──────────────────────────────────────────────────────
@@ -580,7 +793,7 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
     """))).fetchall()
 
     biosig_by_molecule = [
-        {"molecule": r[0], "total": r[1], "avg_sigma": float(r[2]) if r[2] else 0, 
+        {"molecule": r[0], "total": r[1], "avg_sigma": float(r[2]) if r[2] else 0,
          "confirmed": r[3], "marginal": r[4]}
         for r in mol_rows
     ]
@@ -589,7 +802,7 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
 
     # --- Orbital Gap Predictions ---
     orb_stats = (await session.execute(text("""
-        SELECT COUNT(*)::int, 
+        SELECT COUNT(*)::int,
                ROUND(AVG(stability_confidence)::numeric, 4),
                AVG(n_body_runs)::int,
                SUM(CASE WHEN stability_confidence >= 0.9 THEN 1 ELSE 0 END)::int,
@@ -626,7 +839,7 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
     """))).fetchone()
 
     hab_histogram = (await session.execute(text("""
-        SELECT 
+        SELECT
             FLOOR(composite_score * 10)::int as bin,
             COUNT(*)::int
         FROM habitability_scores

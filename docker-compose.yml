@@ -2,15 +2,15 @@ services:
   db:
     image: postgis/postgis:16-3.4
     environment:
-      POSTGRES_USER: exo
-      POSTGRES_PASSWORD: exopass
-      POSTGRES_DB: exoplanets
+      POSTGRES_USER: ${POSTGRES_USER:-exo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-exopass}
+      POSTGRES_DB: ${POSTGRES_DB:-exoplanets}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U exo -d exoplanets"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-exo} -d ${POSTGRES_DB:-exoplanets}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -29,8 +29,10 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://exo:exopass@db:5432/exoplanets
+      DATABASE_URL: postgresql://${POSTGRES_USER:-exo}:${POSTGRES_PASSWORD:-exopass}@db:5432/${POSTGRES_DB:-exoplanets}
       REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3000
+      ORBITAL_SEED: ${ORBITAL_SEED:-42}
     depends_on:
       db:
         condition: service_healthy
@@ -38,7 +40,26 @@ services:
         condition: service_started
     volumes:
       - .:/app
+      - retrieval_outputs:/app/outputs/retrievals
     command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-exo}:${POSTGRES_PASSWORD:-exopass}@db:5432/${POSTGRES_DB:-exoplanets}
+      REDIS_URL: redis://redis:6379/0
+      ORBITAL_SEED: ${ORBITAL_SEED:-42}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - .:/app
+      - retrieval_outputs:/app/outputs/retrievals
+    command: celery -A pipe.celery_worker worker --loglevel=info --concurrency=2
 
   web:
     build:
@@ -56,3 +77,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  retrieval_outputs:

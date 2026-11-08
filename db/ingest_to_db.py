@@ -14,6 +14,7 @@ Requires:
 """
 
 import os
+import sys
 import uuid
 import numpy as np
 import pandas as pd
@@ -21,20 +22,20 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from pathlib import Path
 
-from sqlalchemy import create_engine, text, insert, update
+from sqlalchemy import text, insert, update
 from sqlalchemy.orm import sessionmaker
 
-# Import models to use ORM constructs which enable fast multi-row INSERTs
-from models import PlanetParameter, StarParameter, HabitabilityScore
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "modules"))
 load_dotenv(PROJECT_ROOT / ".env")
 
-DATABASE_URL     = os.environ["DATABASE_URL"]
+from db_sync import create_sync_engine
+from models import PlanetParameter, StarParameter, HabitabilityScore
 INPUT_CSV        = str(PROJECT_ROOT / "planets_enriched_clean.csv")
 PIPELINE_VERSION = "1.0.0"
 
-engine       = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine       = create_sync_engine()
 SessionLocal = sessionmaker(bind=engine)
 
 NOW = datetime.now(timezone.utc)

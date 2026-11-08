@@ -23,6 +23,8 @@ import AnimatedNumber from '@/components/AnimatedNumber'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, AlertTriangle, Play, CheckCircle2, Loader2, XCircle } from 'lucide-react'
 import { PosteriorPlots } from '@/components/PosteriorPlots'
+import { ErrorCard } from '@/components/ErrorCard'
+import { ProvenanceBadge } from '@/components/ProvenanceBadge'
 import type { ChartConfig } from '@/components/ui/chart'
 
 const radarConfig = {
@@ -47,8 +49,8 @@ function tierLabel(s: number): string {
 
 export default function PlanetDetail() {
   const { name } = useParams<{ name: string }>()
-  const { data: planet, isLoading } = usePlanet(name ?? '')
-  const { data: spectrum } = useSpectrum(name ?? '')
+  const { data: planet, isLoading, isError: pError, refetch: refetchPlanet } = usePlanet(name ?? '')
+  const { data: spectrum, isError: sError, refetch: refetchSpectrum } = useSpectrum(name ?? '')
   const specId = spectrum?.spec_id ?? ''
   
   const queryClient = useQueryClient()
@@ -69,7 +71,7 @@ export default function PlanetDetail() {
       { axis: 'Temp', value: planet.habitability.teq_score ?? 0 },
       { axis: 'HZ', value: planet.habitability.hz_score ?? 0 },
       { axis: 'Tidal', value: planet.anomaly_risk.tidal_lock_score ?? 0 },
-      { axis: 'Flare', value: planet.anomaly_risk.flare_score ?? 0 },
+      { axis: 'XUV Escape', value: planet.anomaly_risk.xuv_escape_score ?? 0 },
       { axis: 'Ecc', value: planet.habitability.eccentricity_score ?? 0 },
     ].filter(d => d.value > 0)
   }, [planet])
@@ -77,7 +79,7 @@ export default function PlanetDetail() {
   const riskData = useMemo(() => {
     if (!planet) return []
     return [
-      { name: 'Flares', score: planet.anomaly_risk.flare_score ?? 0 },
+      { name: 'XUV Escape', score: planet.anomaly_risk.xuv_escape_score ?? 0 },
       { name: 'Tidal', score: planet.anomaly_risk.tidal_lock_score ?? 0 },
       { name: 'Ecc', score: planet.habitability.eccentricity_score ?? 0 },
       { name: 'Age', score: planet.habitability.age_score ?? 0 },
@@ -91,6 +93,19 @@ export default function PlanetDetail() {
       .map(p => ({ wavelength: p.wavelength_um, depth: p.depth_ppm }))
       .sort((a, b) => a.wavelength - b.wavelength)
   }, [spectrum])
+
+  const completedRetrievalId = retrievals?.find(r => r.status === 'completed')?.id
+
+  if (pError || sError) {
+    return (
+      <div className="p-6 h-[50vh]">
+        <ErrorCard 
+          message="Failed to load planet details." 
+          onRetry={() => { refetchPlanet(); refetchSpectrum(); }} 
+        />
+      </div>
+    )
+  }
 
   if (isLoading || !planet) {
     return (
@@ -161,50 +176,52 @@ export default function PlanetDetail() {
                 )}
               </div>
             </div>
-            <div className="text-right shrink-0">
-              <AnimatedNumber value={planet.discovery_score} decimals={1} className="text-4xl font-light text-chart-1" />
-              <p className="text-xs uppercase tracking-widest text-muted-foreground mt-2">Discovery Score</p>
-              <p className="text-[10px] text-muted-foreground mt-1">ESI: {comp.toFixed(3)}</p>
+            <div className="flex flex-col gap-3 text-right shrink-0">
+              <div className="flex gap-6 items-end justify-end border-b border-border pb-3">
+                <div>
+                  <div className="text-2xl font-light text-chart-1">
+                    {planet.observability_index != null ? planet.observability_index.toFixed(1) : '—'}
+                  </div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1" title="Geometric SNR / TSM-style proxy">Observability</p>
+                </div>
+                <div>
+                  <div className="text-2xl font-light text-chart-2">
+                    {planet.physical_triage_index != null ? planet.physical_triage_index.toFixed(1) : '—'}
+                  </div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1" title="Habitability − Anomaly Penalty">Physical Triage</p>
+                </div>
+                <div>
+                  <div className="text-2xl font-light text-chart-3">
+                    {planet.characterization_index != null ? planet.characterization_index.toFixed(1) : '—'}
+                  </div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1" title="Biosignatures + Data Quality (Post-observation enrichment)">Characterization</p>
+                </div>
+              </div>
+              
+              <div className="flex justify-end gap-2 items-center mt-1">
+                <p className="text-[11px] text-muted-foreground">
+                  Composite: <span className="font-mono">
+                    {planet.habitability?.composite_score?.toFixed(2) ?? '—'} 
+                    {planet.habitability?.composite_score_iqr ? ` ± ${planet.habitability.composite_score_iqr.toFixed(2)}` : ''}
+                  </span>
+                </p>
+                {planet.habitability?.is_imputed && (
+                  <Badge variant="outline" className="text-[9px] border-amber-500/50 text-amber-500 hover:bg-amber-500/10" title="Mass imputed from radius ($M \sim R^3$). XUV score and composite IQR unreliable.">
+                    Mass Imputed
+                  </Badge>
+                )}
+              </div>
             </div>
           </div>
-
-          {/* Score Breakdown Bar */}
-          {planet.score_breakdown && (
-            <div className="mt-6 pt-4 border-t border-border">
-              <div className="flex items-center gap-1 h-3 rounded-full overflow-hidden bg-secondary">
-                {planet.score_breakdown.habitability > 0 && (
-                  <div className="h-full bg-chart-1 rounded-l-full" style={{ width: `${planet.score_breakdown.habitability}%` }} title={`Habitability: ${planet.score_breakdown.habitability}`} />
-                )}
-                {planet.score_breakdown.biosignature > 0 && (
-                  <div className="h-full bg-chart-2" style={{ width: `${planet.score_breakdown.biosignature}%` }} title={`Biosignatures: ${planet.score_breakdown.biosignature}`} />
-                )}
-                {planet.score_breakdown.data_quality > 0 && (
-                  <div className="h-full bg-chart-3" style={{ width: `${planet.score_breakdown.data_quality}%` }} title={`Data Quality: ${planet.score_breakdown.data_quality}`} />
-                )}
-                {planet.score_breakdown.orbital_context > 0 && (
-                  <div className="h-full bg-chart-4 rounded-r-full" style={{ width: `${planet.score_breakdown.orbital_context}%` }} title={`Orbital: ${planet.score_breakdown.orbital_context}`} />
-                )}
-              </div>
-              <div className="flex justify-between mt-2 text-[10px] text-muted-foreground">
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-chart-1 inline-block"></span> Hab {planet.score_breakdown.habitability}</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-chart-2 inline-block"></span> Bio {planet.score_breakdown.biosignature}</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-chart-3 inline-block"></span> Data {planet.score_breakdown.data_quality}</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-chart-4 inline-block"></span> Orbital {planet.score_breakdown.orbital_context}</span>
-                {planet.score_breakdown.anomaly_penalty < 0 && (
-                  <span className="flex items-center gap-1 text-destructive"><span className="w-2 h-2 rounded-full bg-destructive inline-block"></span> Penalty {planet.score_breakdown.anomaly_penalty}</span>
-                )}
-              </div>
-            </div>
-          )}
         </CardContent>
       </Card>
 
       {/* ── Key Scores — simple stat cards matching reference ─────── */}
       <div className="grid grid-cols-3 gap-4">
         {[
-          { val: planet.habitability.similarity_score ?? 0, label: 'Similarity', desc: 'Earth Similarity Index' },
-          { val: planet.anomaly_risk.risk_score ?? 0, label: 'Safety', desc: 'Environmental risk factor' },
-          { val: planet.habitability.hz_score ?? 0, label: 'HZ Position', desc: 'Habitable zone proximity' },
+          { val: planet.habitability?.similarity_score ?? 0, label: 'Similarity', desc: 'Earth Similarity Index' },
+          { val: planet.anomaly_risk?.safety_score ?? 0, label: 'Safety', desc: 'Environmental safety factor' },
+          { val: planet.habitability?.hz_score ?? 0, label: 'HZ Position', desc: 'Habitable zone proximity' },
         ].map((g) => (
           <Card key={g.label}>
             <CardHeader className="pb-2">
@@ -239,15 +256,21 @@ export default function PlanetDetail() {
               </TableHeader>
               <TableBody>
                 {[
-                  { prop: 'Radius', val: planet.radius_earth, earth: '1.00', unit: 'R⊕' },
-                  { prop: 'Mass', val: planet.mass_earth, earth: '1.00', unit: 'M⊕' },
-                  { prop: 'Period', val: planet.period_days, earth: '365.25', unit: 'd' },
-                  { prop: 'Semi-major axis', val: planet.semi_major_axis_au, earth: '1.00', unit: 'AU' },
-                  { prop: 'Temperature', val: planet.eq_temperature_k, earth: '255', unit: 'K' },
-                  { prop: 'Eccentricity', val: planet.eccentricity, earth: '0.017', unit: '' },
+                  { prop: 'Radius', val: planet.radius_earth, earth: '1.00', unit: 'R⊕', key: 'radius_earth' as const },
+                  { prop: 'Mass', val: planet.mass_earth, earth: '1.00', unit: 'M⊕', key: 'mass_earth' as const },
+                  { prop: 'Period', val: planet.period_days, earth: '365.25', unit: 'd', key: 'period_days' as const },
+                  { prop: 'Semi-major axis', val: planet.semi_major_axis_au, earth: '1.00', unit: 'AU', key: 'semi_major_axis_au' as const },
+                  { prop: 'Temperature', val: planet.eq_temperature_k, earth: '255', unit: 'K', key: 'eq_temperature_k' as const },
+                  { prop: 'Eccentricity', val: planet.eccentricity, earth: '0.017', unit: '', key: 'eccentricity' as const },
                 ].map(row => (
                   <TableRow key={row.prop}>
-                    <TableCell className="text-muted-foreground">{row.prop}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {row.prop}
+                      <ProvenanceBadge
+                        provenance={planet.data_provenance?.[row.key]}
+                        className="ml-1.5 align-middle"
+                      />
+                    </TableCell>
                     <TableCell className="text-right font-data">
                       {row.val != null ? `${Number(row.val).toFixed(2)} ${row.unit}` : '—'}
                     </TableCell>

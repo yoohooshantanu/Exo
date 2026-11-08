@@ -1,4 +1,4 @@
-const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000'
+export const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000'
 
 async function fetchJson<T>(path: string, params?: Record<string, unknown>, init?: RequestInit): Promise<T> {
   const url = new URL(path, API_URL)
@@ -21,7 +21,9 @@ export const api = {
 
   priorityTarget: () => fetchJson<import('@/types').PriorityTarget>('/api/priority-target'),
 
-  planets: (params: { page?: number; page_size?: number; method?: string; year_min?: number; year_max?: number; min_score?: number }) =>
+  taxonomyStats: () => fetchJson<{cluster_label: number, count: number}[]>('/api/taxonomy-stats'),
+
+  planets: (params: { page?: number; page_size?: number; method?: string; year_min?: number; year_max?: number; min_score?: number; search?: string }) =>
     fetchJson<import('@/types').PaginatedResponse<import('@/types').PlanetListItem>>('/api/planets', params),
 
   planet: (name: string) => fetchJson<import('@/types').PlanetProfileVector>(`/api/planets/${encodeURIComponent(name)}`),

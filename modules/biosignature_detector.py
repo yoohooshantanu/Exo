@@ -27,24 +27,28 @@ from scipy.signal import correlate
 from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
+from db_sync import create_sync_engine
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern, WhiteKernel, ConstantKernel
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-DATABASE_URL     = os.environ["DATABASE_URL"]
-MODEL_VERSION    = "3.0.0"
+DATABASE_URL     = os.environ.get("DATABASE_URL", "")
+from config import BIOSIG_MODEL_VERSION as MODEL_VERSION
 OUTPUT_DIR       = PROJECT_ROOT / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-engine  = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine  = create_sync_engine()
 Session = sessionmaker(bind=engine)
 
 # ── constants ────────────────────────────────────────────────────────────────
 
+# Detection significance thresholds
+# Classification: STANDARD VALUE (3σ confirmed is standard in spectroscopy)
+# 2σ marginal threshold is used for watchlist candidates pending confirmation
 CONFIRMED_SIGMA  = 3.0   # Tier 1
 MARGINAL_SIGMA   = 2.0   # Tier 2 floor
 MIN_HITRAN_MATCH = 2     # require ≥2 HITRAN lines for valid detection
@@ -74,7 +78,17 @@ MOL_BAND_CENTERS = {
 }
 MOL_MASK_HALF_WIDTH = 0.15  # µm, mask ± this around each band center
 
-# Instrument quality weights for confidence decay
+# Instrument quality weights — confidence scaling by observatory capability
+# Classification: TRIAGE HEURISTIC — flat per-facility scalars
+# JWST (1.0): Bean, Stevenson & Batalha (2018), PASP 130:114402
+#   — defines expected transit spectroscopy performance baseline
+# HST (0.85): Deming et al. (2013), ApJ 774:95
+#   — WFC3 G141 grism systematics limit precision to ~30 ppm
+# Spitzer (0.70): Knutson et al. (2014), ApJ 794:155
+#   — IRAC channel systematics and limited wavelength coverage
+# Ground-based (0.60): Conservative default for seeing-limited spectrophotometry
+# WARNING: Performance is mode-specific (NIRSpec PRISM ≠ MIRI LRS ≠ NIRCam).
+# A per-facility scalar is a deliberate simplification for triage.
 INSTRUMENT_WEIGHTS = {
     "jwst": 1.0, "james webb": 1.0,
     "hst": 0.85, "hubble": 0.85,
@@ -82,7 +96,16 @@ INSTRUMENT_WEIGHTS = {
 }
 DEFAULT_INSTRUMENT_WEIGHT = 0.60  # ground-based or unknown
 
-# Stellar contamination risk map: spectral_type_prefix -> {molecule: penalty}
+# Stellar contamination risk — flat sigma penalties for transit light source effect
+# Source: Rackham, Apai & Giampapa (2018), ApJ 853:122
+#   "The Transit Light Source Effect: False Spectral Features and Incorrect
+#   Densities for M-dwarf Transiting Planets"
+# Classification: TRIAGE HEURISTIC — conservative flat prior
+# Rackham shows the effect is strongly spectral-type, wavelength, and spot-
+# coverage dependent. A flat -0.5σ for M-dwarf H₂O is a deliberate
+# simplification that errs on the side of caution. The actual effect can be
+# larger or smaller depending on the specific observation.
+# K-dwarf H₂O penalty (-0.3σ) reflects lower but non-zero contamination risk.
 STELLAR_CONTAM_RISK = {
     "M": {"h2o": 0.5, "tio": 0.5, "co": 0.3},
     "K": {"h2o": 0.3},
@@ -352,7 +375,7 @@ def unmix_spectrum(spectrum_df, templates_dict, phys_params):
         template_vals = X[:, i] * y_error
         active_points = np.sum((template_vals > np.max(template_vals)*0.1) & (y > 0))
         
-        if sigma >= MARGINAL_SIGMA:
+        if sigma >= marginal_sigma:
             max_idx = np.argmax(template_vals)
             peak_wl = obs_wl[valid_mask][max_idx]
             mean_excess = np.mean(excess_ppm_arr[valid_mask][template_vals > np.max(template_vals)*0.1]) if active_points > 0 else 0
@@ -372,7 +395,7 @@ def unmix_spectrum(spectrum_df, templates_dict, phys_params):
 
 # ── detection classification ─────────────────────────────────────────────────
 
-def classify_detection(det, all_detections_for_planet, phys_params, host_spectral_type):
+def classify_detection(det, all_detections_for_planet, phys_params, host_spectral_type, marginal_sigma=MARGINAL_SIGMA):
     """Apply two-tier classification, abiotic reasoning, stellar contamination, and instrument weighting."""
     mol = det["molecule"]
     sigma = det["detection_sigma"]
@@ -413,13 +436,13 @@ def classify_detection(det, all_detections_for_planet, phys_params, host_spectra
     
     # CH4 context
     if mol == "ch4":
-        if detected_mols.get("co2", 0) < MARGINAL_SIGMA:
+        if detected_mols.get("co2", 0) < marginal_sigma:
             sigma = max(0.0, sigma - 1.0)
             notes += "CH4 without CO2: possible abiotic origin, -1.0σ penalty. "
             
     # Thermochemical disequilibrium (H2O + CH4 without O3)
     if DISEQ_PAIR.issubset(set(detected_mols.keys())) and mol in DISEQ_PAIR:
-        if detected_mols.get("o3", 0) < MARGINAL_SIGMA:
+        if detected_mols.get("o3", 0) < marginal_sigma:
             notes += "H2O + CH4 detected: potential thermochemical disequilibrium. "
             
     # Triple biosignature check
@@ -429,7 +452,7 @@ def classify_detection(det, all_detections_for_planet, phys_params, host_spectra
             notes += "TRIPLE BIOSIGNATURE (H₂O+CH₄+O₃) — abiotic origin unlikely. "
             
     # CO / CO2 ratio
-    if mol == "co" and detected_mols.get("co2", 0) >= MARGINAL_SIGMA:
+    if mol == "co" and detected_mols.get("co2", 0) >= marginal_sigma:
         if sigma > detected_mols.get("co2"):
             notes += "High CO/CO2 ratio: photochemical disequilibrium flagged. "
             
@@ -459,8 +482,8 @@ def classify_detection(det, all_detections_for_planet, phys_params, host_spectra
     # 4. Tier classification
     if matches >= 3 and sigma >= CONFIRMED_SIGMA:
         tier = "confirmed"
-        notes = f"Tier 1 confirmed ({sigma:.1f}σ, {matches} lines). " + notes
-    elif matches >= 2 and sigma >= MARGINAL_SIGMA:
+        notes = f"Spectral excess flagged for retrieval ({sigma:.1f}σ, {matches} lines). " + notes
+    elif matches >= 2 and sigma >= marginal_sigma:
         tier = "marginal"
         notes = f"Tier 2 marginal ({sigma:.1f}σ, {matches} lines). " + notes
     else:
@@ -565,21 +588,21 @@ def cross_reference(session, planet_detections):
 
 # ── report generation ────────────────────────────────────────────────────────
 
-def generate_report(enriched, all_detections):
+def generate_report(enriched, all_detections, marginal_sigma=MARGINAL_SIGMA):
     """Generate markdown biosignature discovery report."""
     date_str = datetime.now().strftime("%Y-%m-%d")
     confirmed = [d for d in all_detections if d.get("tier") == "confirmed"]
     marginal = [d for d in all_detections if d.get("tier") == "marginal"]
 
     md = f"""# Biosignature Detection Report
-**Date:** {date_str}  |  **Model:** v{MODEL_VERSION}  |  **Threshold:** {CONFIRMED_SIGMA}σ confirmed / {MARGINAL_SIGMA}σ marginal
+**Date:** {date_str}  |  **Model:** v{MODEL_VERSION}  |  **Threshold:** {CONFIRMED_SIGMA}σ confirmed / {marginal_sigma}σ marginal
 
 ## Summary
 - **Planets analyzed:** {len(enriched)}
 - **Tier 1 (confirmed ≥{CONFIRMED_SIGMA}σ):** {len(confirmed)} detections across {len(set(d['planet_name'] for d in confirmed))} planets
-- **Tier 2 (marginal {MARGINAL_SIGMA}–{CONFIRMED_SIGMA}σ):** {len(marginal)} detections across {len(set(d.get('planet_name','') for d in marginal))} planets
+- **Tier 2 (marginal {marginal_sigma}–{CONFIRMED_SIGMA}σ):** {len(marginal)} detections across {len(set(d.get('planet_name','') for d in marginal))} planets
 
-## Tier 1 — Confirmed Detections (≥{CONFIRMED_SIGMA}σ)
+## Tier 1 — Spectral Excess Flagged for Retrieval (≥{CONFIRMED_SIGMA}σ)
 
 | Planet | Molecule | σ | ln B | Excess (ppm) | Lines | λ (µm) | Facility | Hab. Score |
 |:-------|:---------|--:|:-----|:-------------|:------|:-------|:---------|:-----------|
@@ -596,7 +619,7 @@ def generate_report(enriched, all_detections):
                    f"| {d.get('facility','—')} | {hab} |\n")
 
     md += f"""
-## Tier 2 — Marginal Detections ({MARGINAL_SIGMA}–{CONFIRMED_SIGMA}σ) — Watchlist
+## Tier 2 — Marginal Detections ({marginal_sigma}–{CONFIRMED_SIGMA}σ) — Watchlist
 
 | Planet | Molecule | σ | ln B | Excess (ppm) | Lines | Notes |
 |:-------|:---------|--:|:-----|:-------------|:------|:------|
@@ -615,7 +638,7 @@ def generate_report(enriched, all_detections):
 1. **Spectra Source:** NASA Exoplanet Archive Atmospheric Spectroscopy Table (TAP).
 2. **First-Pass Heuristic Matching:** The HITRAN molecular line matching (≥{MIN_HITRAN_MATCH} lines required per detection) is a *first-pass heuristic matching algorithm*.
 3. **Continuum Estimation:** Legendre polynomial (degree {POLY_DEGREE}) masking known band centers, replacing the legacy median binning.
-4. **Significance & Evidence:** Detection σ = (depth_obs − continuum) / uncertainty. Bayesian Evidence (ln B) approximated via BIC (M1 vs M0).
+4. **Significance & Evidence:** Detection σ = (depth_obs − continuum) / uncertainty (Note: This is a first-pass spectral excess heuristic, not a retrieval-grade Bayesian significance). Bayesian Evidence (ln B) approximated via BIC (M1 vs M0).
 5. **Validation:** Cross-referenced against stellar spectra (M/K dwarfs) to penalize possible starspot contamination. Multi-epoch consistency applies confidence decay.
 6. **Cloud/Haze Suppression:** If spectral variance is <20% of a theoretical scale-height depth, it implies a muted/hazy spectrum and a -0.5σ penalty is applied.
 
@@ -628,7 +651,7 @@ def generate_report(enriched, all_detections):
     return out_path
 
 
-def run_injection_recovery():
+def run_injection_recovery(marginal_sigma=MARGINAL_SIGMA):
     """Inject synthetic molecular signals into real spectra and measure recovery rates."""
     print(f"\n[Injection-Recovery Validation] v{MODEL_VERSION}")
     print("=" * 60)
@@ -691,7 +714,7 @@ def run_injection_recovery():
                 if mol not in templates_dict: continue
                 det = next((d for d in null_dets if d["molecule"] == mol), None)
                 total_null_tests += 1 
-                if det and det["detection_sigma"] >= MARGINAL_SIGMA:
+                if det and det["detection_sigma"] >= marginal_sigma:
                     false_positives[mol] += 1
                     
             # 2. Synthetic injections
@@ -723,7 +746,7 @@ def run_injection_recovery():
                     rec_dets = unmix_spectrum(inj_df, templates_dict, phys_params)
                     det = next((d for d in rec_dets if d["molecule"] == mol), None)
                     results[mol][amp_sigma]["total"] += 1
-                    if det and det["detection_sigma"] >= MARGINAL_SIGMA:
+                    if det and det["detection_sigma"] >= marginal_sigma:
                         results[mol][amp_sigma]["recovered"] += 1
 
         print("\n  Recovery Rates (MARGINAL threshold):")
@@ -802,16 +825,14 @@ def apply_multi_epoch_consistency(planet_dets):
 
 def run(planet_name=None, threshold=None, dry_run=False, validate=False):
     if validate:
-        run_injection_recovery()
+        run_injection_recovery(marginal_sigma=threshold or MARGINAL_SIGMA)
         return
 
-    if threshold:
-        global MARGINAL_SIGMA
-        MARGINAL_SIGMA = threshold
+    marginal_sigma = threshold if threshold is not None else MARGINAL_SIGMA
 
     print(f"\nBiosignature Detector v{MODEL_VERSION}")
     print(f"  Tier 1 threshold: >={CONFIRMED_SIGMA} sigma (confirmed)")
-    print(f"  Tier 2 threshold: >={MARGINAL_SIGMA} sigma (marginal/watchlist)")
+    print(f"  Tier 2 threshold: >={marginal_sigma} sigma (marginal/watchlist)")
     print(f"  Min HITRAN lines: {MIN_HITRAN_MATCH}")
     if planet_name:
         print(f"  Filter: {planet_name}")
@@ -858,7 +879,10 @@ def run(planet_name=None, threshold=None, dry_run=False, validate=False):
 
                 templates_dict = {}
                 for mol in TARGET_MOLECULES:
-                    template_df = fetch_template(session, mol, phys_params.get("teq"))
+                    cache_key = (mol, phys_params.get("teq"))
+                    if cache_key not in template_cache:
+                        template_cache[cache_key] = fetch_template(session, mol, phys_params.get("teq"))
+                    template_df = template_cache[cache_key]
                     if not template_df.empty:
                         templates_dict[mol] = template_df
 
@@ -877,7 +901,7 @@ def run(planet_name=None, threshold=None, dry_run=False, validate=False):
 
             # Classify all detections for this planet
             for det in planet_dets:
-                classify_detection(det, planet_dets, phys_params, host_spectral_type)
+                classify_detection(det, planet_dets, phys_params, host_spectral_type, marginal_sigma)
                 if det["detection_sigma"] >= CONFIRMED_SIGMA:
                     tier_label = "[T1]"
                 else:
@@ -898,7 +922,7 @@ def run(planet_name=None, threshold=None, dry_run=False, validate=False):
 
         print(f"\n{'='*60}")
         print(f"  Completed in {elapsed:.1f}s")
-        print(f"  Tier 1 (confirmed): {len(confirmed)} detections")
+        print(f"  Tier 1 (flagged for retrieval): {len(confirmed)} detections")
         print(f"  Tier 2 (marginal):  {len(marginal)} detections")
         print(f"  Total planets:      {len(planet_detections)}")
 
@@ -927,7 +951,7 @@ def run(planet_name=None, threshold=None, dry_run=False, validate=False):
         enriched = cross_reference(session, planet_detections)
 
         print(f"\nGenerating report ...")
-        out_path = generate_report(enriched, all_detections)
+        out_path = generate_report(enriched, all_detections, marginal_sigma)
         print(f"  Saved -> {out_path}")
 
         # High-priority alerts

@@ -20,6 +20,8 @@ python modules/orbital_gap_predictor.py --dry-run      # print predictions, no D
 """
 import os
 import math
+import hashlib
+from utils import nv
 import uuid
 import random
 import argparse
@@ -31,11 +33,11 @@ import numpy as np
 import pandas as pd
 import rebound
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+from db_sync import create_sync_engine
 from sqlalchemy.orm import sessionmaker
 load_dotenv()
-DATABASE_URL     = os.environ["DATABASE_URL"]
-MODEL_VERSION    = "3.1.0"
+from config import ORBITAL_MODEL_VERSION as MODEL_VERSION, DEFAULT_ORBITAL_SEED
 M_EARTH_TO_SOLAR = 3.003e-6
 # Output goes to same directory as script — no hardcoded paths
 OUTPUT_DIR = Path(__file__).parent.parent / "outputs"
@@ -44,13 +46,6 @@ def new_id() -> str:
     return str(uuid.uuid4())
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
-def nv(val):
-    if val is None: return None
-    try:
-        if isinstance(val, float) and math.isnan(val): return None
-        if pd.isna(val): return None
-    except Exception: pass
-    return float(val)
 # ── Orbital mechanics helpers ─────────────────────────────────────────────────
 def get_mass_earth(r_earth, m_earth) -> float:
     r = nv(r_earth); m = nv(m_earth)
@@ -68,7 +63,7 @@ def mutual_hill_radius(a1, m1_solar, a2, m2_solar, m_star) -> float:
     return ((a1 + a2) / 2.0) * ((m1_solar + m2_solar) / (3.0 * m_star)) ** (1/3)
 # ── N-body integration ────────────────────────────────────────────────────────
 def run_megno(m_star: float, planets: list, test_a: float,
-            test_m_solar: float, fast: bool = False) -> tuple:
+            test_m_solar: float, fast: bool = False, seed: int | None = None) -> tuple:
     """
     Three-stage MEGNO stability check.
     Stage 1 (analytical): Gladman mutual Hill radius filter — already done before calling
@@ -76,6 +71,10 @@ def run_megno(m_star: float, planets: list, test_a: float,
     Stage 3 (deep):       50,000 orbits, reject MEGNO > 2.2  (skipped if fast=True)
     Returns (is_stable, megno, n_orbits_run)
     """
+    if seed is not None:
+        np.random.seed(seed)
+        random.seed(seed)
+
     sim = rebound.Simulation()
     sim.units    = ('yr', 'AU', 'Msun')
     sim.integrator = "whfast"
@@ -118,7 +117,7 @@ def run_megno(m_star: float, planets: list, test_a: float,
     sim.init_megno()
     test_period = test_a ** 1.5
     max_t1 = min(5_000  * test_period, sim.dt * 2_000_000)
-    max_t2 = min(20_000 * test_period, sim.dt * 4_000_000)
+    max_t2 = min(50_000 * test_period, sim.dt * 4_000_000)
     
     try:
         E0 = sim.energy()
@@ -175,13 +174,20 @@ MMR_CANDIDATES = [
     ("1:2 MMR outer", lambda a1, a2: a2 * (0.5) ** (2/3)),
     ("Geometric center", lambda a1, a2: math.sqrt(a1 * a2)),
 ]
+def _trial_seed(base_seed: int, star_id: str, gap_idx: int, label: str, trial: int) -> int:
+    """Deterministic seed stable across processes (unlike built-in hash())."""
+    key = f"{base_seed}:{star_id}:{gap_idx}:{label}:{trial}".encode()
+    digest = hashlib.blake2b(key, digest_size=4).digest()
+    return int.from_bytes(digest, "big")
+
+
 def process_system(args: tuple) -> list:
     """
     Process one planetary system.
     Designed to run in a subprocess — no DB access, pure computation.
     Returns list of prediction dicts.
     """
-    star_id, star_name, m_star, planet_rows, fast = args
+    star_id, star_name, m_star, planet_rows, fast, base_seed = args
     # build planet list
     planets = []
     for row in planet_rows:
@@ -231,9 +237,12 @@ def process_system(args: tuple) -> list:
             # Stage 1: Fast scan (N=5)
             n_fast = 5
             stable_fast = 0
-            for i in range(n_fast):
-                total = i + 1
-                is_stable, _, _ = run_megno(m_star, planets, test_a, test_m_solar, fast=True)
+            for run_idx in range(n_fast):
+                total = run_idx + 1
+                trial_seed = _trial_seed(base_seed, star_id, i, label, run_idx)
+                is_stable, _, _ = run_megno(
+                    m_star, planets, test_a, test_m_solar, fast=True, seed=trial_seed
+                )
                 if is_stable:
                     stable_fast += 1
                 if (stable_fast + (n_fast - total)) / n_fast < 0.75:
@@ -251,9 +260,12 @@ def process_system(args: tuple) -> list:
             valid_megnos = 0
             total_deep = 0
             
-            for i in range(n_deep):
-                total_deep = i + 1
-                is_stable, megno, n_orbits = run_megno(m_star, planets, test_a, test_m_solar, fast=False)
+            for run_idx in range(n_deep):
+                total_deep = run_idx + 1
+                trial_seed = _trial_seed(base_seed, star_id, i, label, run_idx + 1000)
+                is_stable, megno, n_orbits = run_megno(
+                    m_star, planets, test_a, test_m_solar, fast=False, seed=trial_seed
+                )
                 if is_stable:
                     stable_deep += 1
                 if math.isfinite(megno) and megno < 10.0:
@@ -484,7 +496,11 @@ priority relative to any subsequent telescope confirmation.
     return out_path
 # ── Main ──────────────────────────────────────────────────────────────────────
 def run(n_workers: int = None, fast: bool = False, dry_run: bool = False):
-    engine  = create_engine(DATABASE_URL, pool_pre_ping=True)
+    base_seed = int(os.environ.get("ORBITAL_SEED", DEFAULT_ORBITAL_SEED))
+    np.random.seed(base_seed)
+    random.seed(base_seed)
+
+    engine  = create_sync_engine()
     Session = sessionmaker(bind=engine)
     session = Session()
     n_workers = n_workers or max(1, os.cpu_count() - 1)
@@ -497,7 +513,7 @@ def run(n_workers: int = None, fast: bool = False, dry_run: bool = False):
     systems = fetch_all_systems(session)
     # build args for parallel processing
     args_list = [
-        (s["star_id"], s["star_name"], s["m_star"], s["planets"], fast)
+        (s["star_id"], s["star_name"], s["m_star"], s["planets"], fast, base_seed)
         for s in systems
     ]
     print(f"\nProcessing {len(args_list)} systems on {n_workers} workers ...")

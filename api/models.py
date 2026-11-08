@@ -1,7 +1,25 @@
 """Pydantic response models."""
-from typing import Optional, List
-from pydantic import BaseModel, Field
 from datetime import datetime
+from typing import List, Optional
+
+from pydantic import BaseModel, ConfigDict
+
+
+class ParamProvenance(BaseModel):
+    """Per-parameter provenance metadata."""
+    status: str  # "measured", "derived", "imputed", "heuristic"
+    source: Optional[str] = None
+    uncertainty: Optional[List[float]] = None  # [lower, upper] if available
+
+class DataProvenance(BaseModel):
+    """Provenance for key physical parameters and scores."""
+    radius_earth: Optional[ParamProvenance] = None
+    mass_earth: Optional[ParamProvenance] = None
+    period_days: Optional[ParamProvenance] = None
+    eq_temperature_k: Optional[ParamProvenance] = None
+    semi_major_axis_au: Optional[ParamProvenance] = None
+    eccentricity: Optional[ParamProvenance] = None
+    composite_score: Optional[ParamProvenance] = None
 
 
 class SystemPlanetItem(BaseModel):
@@ -21,6 +39,8 @@ class OrbitalGapItem(BaseModel):
     detection_method_hint: Optional[str]
 
 class PlanetListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     planet_name: str
     hostname: Optional[str]
     discovery_method: Optional[str]
@@ -31,21 +51,27 @@ class PlanetListItem(BaseModel):
     eq_temperature_k: Optional[float]
     semi_major_axis_au: Optional[float]
     composite_score: Optional[float]
+    composite_score_iqr: Optional[float] = None
+    is_imputed: Optional[bool] = False
     discovery_score: Optional[float]
+    observability_index: Optional[float] = None
+    physical_triage_index: Optional[float] = None
+    characterization_index: Optional[float] = None
     hz_score: Optional[float]
     cluster_name: Optional[str]
-
-    class Config:
-        from_attributes = True
 
 
 class ProfileHabitability(BaseModel):
     composite_score: Optional[float]
+    composite_score_iqr: Optional[float] = None
+    is_imputed: Optional[bool] = False
     similarity_score: Optional[float]
     hz_score: Optional[float]
     teq_score: Optional[float]
     radius_esi_score: Optional[float]
     mass_esi_score: Optional[float]
+    eccentricity_score: Optional[float] = None
+    age_score: Optional[float] = None
 
 class ProfileBiosignatures(BaseModel):
     biosig_count: int
@@ -60,8 +86,8 @@ class ProfileConfidence(BaseModel):
 class ProfileAnomalyRisk(BaseModel):
     anomaly_count: int
     anomaly_types: List[str]
-    risk_score: Optional[float]
-    flare_score: Optional[float]
+    safety_score: Optional[float] = None
+    xuv_escape_score: Optional[float]
     tidal_lock_score: Optional[float]
 
 class ScoreBreakdown(BaseModel):
@@ -70,8 +96,11 @@ class ScoreBreakdown(BaseModel):
     data_quality: float = 0.0
     orbital_context: float = 0.0
     anomaly_penalty: float = 0.0
+    data_confidence: float = 0.0
 
 class PlanetProfileVector(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     planet_name: str
     planet_id: str
     hostname: Optional[str]
@@ -79,7 +108,7 @@ class PlanetProfileVector(BaseModel):
     status: str
     discovery_method: Optional[str]
     discovery_year: Optional[int]
-    
+
     # Core Params
     radius_earth: Optional[float]
     mass_earth: Optional[float]
@@ -88,40 +117,39 @@ class PlanetProfileVector(BaseModel):
     semi_major_axis_au: Optional[float]
     eccentricity: Optional[float]
     density_earth: Optional[float]
-    
+
     # Cluster Info
     cluster_label: Optional[int]
     cluster_name: Optional[str]
     distance_to_centroid: Optional[float]
-    
+
     # Unified Discovery Score (all modules combined)
     discovery_score: float = 0.0
     score_breakdown: ScoreBreakdown = ScoreBreakdown()
-    
+
     # The 4 Core Vectors
     habitability: ProfileHabitability
     biosignatures: ProfileBiosignatures
     confidence: ProfileConfidence
     anomaly_risk: ProfileAnomalyRisk
-    
+
     # System Architecture
     system_planets: List[SystemPlanetItem] = []
     orbital_gaps: List[OrbitalGapItem] = []
-    
-    class Config:
-        from_attributes = True
+
+    # Provenance metadata
+    data_provenance: Optional[DataProvenance] = None
 
 
 class StarItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     star_id: str
     hip_name: str
     ra: float
     dec: float
     distance_pc: Optional[float]
     planet_count: int
-
-    class Config:
-        from_attributes = True
 
 
 class SpectrumPoint(BaseModel):
@@ -161,6 +189,8 @@ class SpectrumView(BaseModel):
 
 
 class AtmosphericRetrievalItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     retrieval_id: str
     spec_id: str
     model_name: str
@@ -171,14 +201,14 @@ class AtmosphericRetrievalItem(BaseModel):
     error_message: Optional[str] = None
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
-
 
 class RankingItem(BaseModel):
     planet_name: str
     hostname: Optional[str]
     discovery_score: Optional[float]
+    observability_index: Optional[float] = None
+    physical_triage_index: Optional[float] = None
+    characterization_index: Optional[float] = None
     category: str
     detail: Optional[str]
 
@@ -248,6 +278,8 @@ class PriorityTarget(BaseModel):
 
 
 class SystemPlanet(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     planet_name: str
     radius_earth: Optional[float] = None
     mass_earth: Optional[float] = None
@@ -257,9 +289,6 @@ class SystemPlanet(BaseModel):
     eq_temperature_k: Optional[float] = None
     composite_score: Optional[float] = None
     cluster_name: Optional[str] = None
-
-    class Config:
-        from_attributes = True
 
 
 class StarSystemResponse(BaseModel):
