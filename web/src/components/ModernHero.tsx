@@ -10,9 +10,9 @@ interface ModernHeroProps {
 
 // Sample of notable confirmed exoplanets for the quick-orbit switcher
 const featuredPlanets = [
-  { name: 'TRAPPIST-1 e', type: 'Temperate Rocky', teq: '251 K', dist: '12.1 pc', triage: 82.4, obs: 78.1 },
-  { name: 'LHS 1140 b', type: 'Super-Earth', teq: '235 K', dist: '15.0 pc', triage: 74.0, obs: 84.5 },
-  { name: 'TOI-700 d', type: 'Earth-size HZ', teq: '269 K', dist: '31.1 pc', triage: 79.8, obs: 64.2 },
+  { name: 'TRAPPIST-1 e', type: 'Unique Archetype (Cold Rocky)', teq: '251 K', dist: '12.1 pc', triage: 77.2, obs: 78.1 },
+  { name: 'LHS 1140 b', type: 'Super-Earth', teq: '235 K', dist: '15.0 pc', triage: 69.3, obs: 76.9 },
+  { name: 'TOI-700 d', type: 'Cold Rocky', teq: '269 K', dist: '31.1 pc', triage: 79.8, obs: 64.2 },
   { name: 'K2-18 b', type: 'Sub-Neptune', teq: '255 K', dist: '38.0 pc', triage: 61.2, obs: 91.0 },
 ]
 

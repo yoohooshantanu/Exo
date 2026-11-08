@@ -269,6 +269,9 @@ class PriorityTarget(BaseModel):
     planet_name: str
     hostname: Optional[str] = None
     discovery_score: float
+    observability_index: Optional[float] = None
+    physical_triage_index: Optional[float] = None
+    characterization_index: Optional[float] = None
     hz_score: Optional[float] = None
     cluster_name: Optional[str] = None
     radius_earth: Optional[float] = None
