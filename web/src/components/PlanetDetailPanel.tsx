@@ -85,7 +85,14 @@ export default function PlanetDetailPanel({ name }: { name: string }) {
               <RadarChart data={esiData} cx="50%" cy="50%" outerRadius="75%">
                 <PolarGrid stroke="hsl(var(--muted-foreground)/0.2)" />
                 <PolarAngleAxis dataKey="axis" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
-                <PolarRadiusAxis domain={[0, 1]} angle={90} tickCount={6} tick={false} stroke="hsl(var(--muted-foreground)/0.2)" />
+                <PolarRadiusAxis 
+                  type="number" 
+                  domain={[0, 1]} 
+                  angle={90} 
+                  tickCount={6} 
+                  tick={false} 
+                  stroke="hsl(var(--muted-foreground)/0.2)" 
+                />
                 <ChartTooltip content={<ChartTooltipContent />} />
                 <Radar dataKey="value" fill="var(--chart-1)" fillOpacity={0.25} stroke="var(--chart-1)" strokeWidth={1.5} />
               </RadarChart>

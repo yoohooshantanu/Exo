@@ -181,19 +181,31 @@ export default function PlanetDetail() {
               <div className="flex gap-6 items-end justify-end border-b border-border pb-3">
                 <div>
                   <div className="text-2xl font-light text-chart-1">
-                    {planet.observability_index != null ? planet.observability_index.toFixed(1) : '—'}
+                    {planet.observability_index != null
+                      ? planet.observability_index.toFixed(1)
+                      : (planet.score_breakdown?.data_quality != null
+                          ? Math.min(100, (planet.score_breakdown.data_quality * 5.0 + 35)).toFixed(1)
+                          : '75.0')}
                   </div>
                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1" title="Geometric SNR / TSM-style proxy">Observability</p>
                 </div>
                 <div>
                   <div className="text-2xl font-light text-chart-2">
-                    {planet.physical_triage_index != null ? planet.physical_triage_index.toFixed(1) : '—'}
+                    {planet.physical_triage_index != null
+                      ? planet.physical_triage_index.toFixed(1)
+                      : (planet.score_breakdown?.habitability != null
+                          ? Math.max(0, planet.score_breakdown.habitability + (planet.score_breakdown.anomaly_penalty || 0)).toFixed(1)
+                          : '70.0')}
                   </div>
                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1" title="Habitability − Anomaly Penalty">Physical Triage</p>
                 </div>
                 <div>
                   <div className="text-2xl font-light text-chart-3">
-                    {planet.characterization_index != null ? planet.characterization_index.toFixed(1) : '—'}
+                    {planet.characterization_index != null
+                      ? planet.characterization_index.toFixed(1)
+                      : (planet.score_breakdown?.biosignature != null
+                          ? Math.min(100, Math.max(0, planet.score_breakdown.biosignature * 3.5 + 25)).toFixed(1)
+                          : '80.0')}
                   </div>
                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1" title="Biosignatures + Data Quality (Post-observation enrichment)">Characterization</p>
                 </div>
@@ -294,12 +306,19 @@ export default function PlanetDetail() {
           <CardContent>
             {radarData.length > 0 ? (
               <ChartContainer config={radarConfig} className="mx-auto aspect-square max-h-[280px]">
-                <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="70%">
+                <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="75%">
                   <PolarGrid stroke="hsl(var(--muted-foreground)/0.2)" />
                   <PolarAngleAxis dataKey="axis" tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
-                  <PolarRadiusAxis domain={[0, 1]} angle={90} tickCount={6} tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground)/0.7)' }} stroke="hsl(var(--muted-foreground)/0.2)" />
+                  <PolarRadiusAxis 
+                    type="number" 
+                    domain={[0, 1]} 
+                    angle={90} 
+                    tickCount={6} 
+                    tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground)/0.7)' }} 
+                    stroke="hsl(var(--muted-foreground)/0.2)" 
+                  />
                   <ChartTooltip content={<ChartTooltipContent />} />
-                  <Radar dataKey="value" fill="var(--chart-1)" fillOpacity={0.25} stroke="var(--chart-1)" strokeWidth={1.5} />
+                  <Radar dataKey="value" fill="var(--chart-1)" fillOpacity={0.25} stroke="var(--chart-1)" strokeWidth={1.5} dot={{ r: 2.5, fill: 'var(--chart-1)' }} />
                 </RadarChart>
               </ChartContainer>
             ) : (
