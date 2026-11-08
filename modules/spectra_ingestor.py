@@ -23,7 +23,7 @@ import re
 import uuid
 import argparse
 import math
-from utils import nv
+from modules.utils import nv
 import time
 import requests
 import numpy as np
@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
-from db_sync import create_sync_engine
+from modules.db_sync import create_sync_engine
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")

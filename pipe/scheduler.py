@@ -39,7 +39,7 @@ from prefect import flow, task, get_run_logger
 
 load_dotenv()
 
-from db_sync import create_sync_engine
+from modules.db_sync import create_sync_engine
 
 engine       = create_sync_engine()
 Session      = sessionmaker(bind=engine)

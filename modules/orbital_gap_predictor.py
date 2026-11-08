@@ -21,7 +21,7 @@ python modules/orbital_gap_predictor.py --dry-run      # print predictions, no D
 import os
 import math
 import hashlib
-from utils import nv
+from modules.utils import nv
 import uuid
 import random
 import argparse
@@ -34,10 +34,10 @@ import pandas as pd
 import rebound
 from dotenv import load_dotenv
 from sqlalchemy import text
-from db_sync import create_sync_engine
+from modules.db_sync import create_sync_engine
 from sqlalchemy.orm import sessionmaker
 load_dotenv()
-from config import ORBITAL_MODEL_VERSION as MODEL_VERSION, DEFAULT_ORBITAL_SEED
+from modules.config import ORBITAL_MODEL_VERSION as MODEL_VERSION, DEFAULT_ORBITAL_SEED
 M_EARTH_TO_SOLAR = 3.003e-6
 # Output goes to same directory as script — no hardcoded paths
 OUTPUT_DIR = Path(__file__).parent.parent / "outputs"

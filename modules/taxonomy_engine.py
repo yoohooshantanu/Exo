@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from sqlalchemy import text, insert
 from sqlalchemy.orm import sessionmaker
-from db_sync import create_sync_engine
+from modules.db_sync import create_sync_engine
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -31,7 +31,7 @@ from db.models import TaxonomyCluster
 
 load_dotenv(PROJECT_ROOT / ".env")
 
-from config import TAXONOMY_MODEL_VERSION as MODEL_VERSION
+from modules.config import TAXONOMY_MODEL_VERSION as MODEL_VERSION
 
 engine  = create_sync_engine()
 Session = sessionmaker(bind=engine)

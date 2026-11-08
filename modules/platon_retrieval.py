@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
-from db_sync import create_sync_engine
-from config import RETRIEVAL_OUTPUT_DIR
+from modules.db_sync import create_sync_engine
+from modules.config import RETRIEVAL_OUTPUT_DIR
 
 from dotenv import load_dotenv
 

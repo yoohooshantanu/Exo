@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from sqlalchemy import text, insert, update
 from sqlalchemy.orm import sessionmaker
-from db_sync import create_sync_engine
+from modules.db_sync import create_sync_engine
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -34,7 +34,7 @@ from db.models import AnomalyFlag
 
 load_dotenv(PROJECT_ROOT / ".env")
 
-from config import ANOMALY_MODEL_VERSION as MODEL_VERSION
+from modules.config import ANOMALY_MODEL_VERSION as MODEL_VERSION
 
 engine  = create_sync_engine()
 Session = sessionmaker(bind=engine)
@@ -47,7 +47,7 @@ def new_id(): return str(uuid.uuid4())
 def now_utc(): return datetime.now(timezone.utc)
 def log(msg): print(f"  {datetime.now(timezone.utc).strftime('%H:%M:%S')}  {msg}")
 
-from utils import nv
+from modules.utils import nv
 
 
 # ── Zeng et al. 2016 composition curves ──────────────────────────────────────

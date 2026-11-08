@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
-from db_sync import create_sync_engine
+from modules.db_sync import create_sync_engine
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern, WhiteKernel, ConstantKernel
 
@@ -37,7 +37,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 DATABASE_URL     = os.environ.get("DATABASE_URL", "")
-from config import BIOSIG_MODEL_VERSION as MODEL_VERSION
+from modules.config import BIOSIG_MODEL_VERSION as MODEL_VERSION
 OUTPUT_DIR       = PROJECT_ROOT / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 

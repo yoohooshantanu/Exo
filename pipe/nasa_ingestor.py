@@ -12,7 +12,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "modules"))
 load_dotenv(PROJECT_ROOT / ".env")
 
-from db_sync import create_sync_engine
+from modules.db_sync import create_sync_engine
 
 engine = create_sync_engine()
 SessionLocal = sessionmaker(bind=engine)
