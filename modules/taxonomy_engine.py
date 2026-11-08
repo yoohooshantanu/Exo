@@ -239,7 +239,7 @@ def compute_cluster_stats(df, labels):
         t_centroid = centroid.get("eq_temperature_k")
         name = auto_name_cluster(r_centroid, t_centroid) if r_centroid else "Unknown"
         if label == -1:
-            name = "NOISE (unique planets)"
+            name = "Unique Archetype (unique planets)"
 
         # Check if matches a NASA classification
         has_nasa_match = any(nc.lower() in name.lower() for nc in NASA_CLASSES)
@@ -310,7 +310,7 @@ def write_clusters(session, df, labels, X_scaled, cluster_stats):
         if int(row.get("n_imputed", 0)) > MAX_IMPUTED_FOR_CLUSTERING:
             cluster_name = f"IMPUTED ({cluster_name})"
         if label == -1:
-            cluster_name = f"NOISE ({cluster_name})"
+            cluster_name = f"Unique Archetype ({cluster_name})"
 
         # Distance to centroid
         if label != -1 and label in cluster_centroids:

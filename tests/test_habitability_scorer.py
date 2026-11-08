@@ -20,6 +20,8 @@ from modules.habitability_scorer import (
     score_age,
     derive_teq,
     weighted_average,
+    p_rocky,
+    SAFETY_PRIORS,
     ESI_EXPONENTS,
     TEQ_REF_K,
     RISK_WEIGHTS,
@@ -310,3 +312,29 @@ class TestConstants:
     def test_esi_exponents_positive(self):
         for name, exp in ESI_EXPONENTS.items():
             assert exp > 0, f"ESI exponent '{name}' should be positive"
+
+
+# ── Terrestrial Surface Gate ─────────────────────────────────────────────────
+
+class TestPRocky:
+    def test_earth_radius_returns_near_1(self):
+        assert p_rocky(1.0) > 0.99
+
+    def test_trappist1e_returns_near_1(self):
+        assert p_rocky(0.92) > 0.99
+
+    def test_sub_neptune_k2_332b_severely_penalized(self):
+        # K2-332 b has Rp = 2.20 Earth radii -> gaseous volatile envelope
+        prob = p_rocky(2.20)
+        assert prob < 0.10
+
+    def test_jupiter_zero(self):
+        assert p_rocky(11.2) == pytest.approx(0.0, abs=1e-6)
+
+    def test_dense_super_earth_preserved(self):
+        # LHS 1140 b: Rp = 1.73, Mp = 5.6 -> dense terrestrial/ocean world
+        assert p_rocky(1.73, 5.6) >= 0.90
+
+    def test_none_returns_zero(self):
+        assert p_rocky(None) == 0.0
+
