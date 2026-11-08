@@ -31,7 +31,8 @@ flowchart LR
 
 - [Why This Exists](#-why-this-exists)
 - [How It Works — The Five Engines](#-how-it-works--the-five-engines)
-- [Discovery Score](#-discovery-score)
+- [Decision Layer (Three Decoupled Indices)](#-decision-layer-three-decoupled-discovery-indices)
+- [Platform & Observatory UI Features](#-platform--observatory-ui-features)
 - [Data Sources](#-data-sources)
 - [Architecture](#-architecture)
 - [Quick Start](#-quick-start)
@@ -67,7 +68,7 @@ Each engine is a standalone Python script that reads from and writes to the shar
 
 > `modules/habitability_scorer.py` · v5.0.0
 
-Scores every confirmed planet on **two tracks** — one measures how Earth-like the planet is physically, the other measures how capable the planet is of long-term survival (environmental risk). Existing catalogs only do the first one.
+Scores every confirmed planet through a rigorous three-stage pipeline: **Physical Earth Similarity**, **Environmental Safety (with Bayesian Priors)**, and a **Terrestrial Surface Gate** grounded in the Fulton et al. (2017) radius valley. Existing exoplanet catalogs only compute the first one, leading to temperate sub-Neptunes being erroneously classified as habitable.
 
 <details>
 <summary><b>Track 1 — Earth Similarity Index (ESI)</b> &nbsp;·&nbsp; <i>click to expand</i></summary>
@@ -94,28 +95,50 @@ $$\text{ESI} = \prod_{i=1}^{n} \left( 1 - \left| \frac{x_i - x_0}{x_i + x_0} \ri
 </details>
 
 <details>
-<summary><b>Track 2 — Environmental Risk</b> &nbsp;·&nbsp; <i>click to expand</i></summary>
+<summary><b>Track 2 — Environmental Safety & Bayesian Shrinkage</b> &nbsp;·&nbsp; <i>click to expand</i></summary>
 
 <br>
 
-This is the platform's novel contribution. It penalizes conditions that undermine habitability even when physical parameters look Earth-like:
+Measures atmospheric retention and environmental viability over gigayear timescales:
 
-$$\text{Risk} = 0.45 \cdot \text{XUV Escape} + 0.30 \cdot \text{Tidal} + 0.15 \cdot \text{Ecc} + 0.10 \cdot \text{Age}$$
+$$\text{Safety} = 0.45 \cdot \text{XUV Escape} + 0.30 \cdot \text{Tidal Lock} + 0.15 \cdot \text{Eccentricity} + 0.10 \cdot \text{Stellar Age}$$
 
 | Factor | Weight | Logic |
 |:---|---:|:---|
-| **XUV Escape (Retention)** | 0.45 | Physically-motivated calculation of envelope loss over time (Luger & Barnes). Atmosphere stripping is the primary failure mode for HZ planets around red dwarfs. |
-| **Tidal locking** | 0.30 | Sigmoid of τ_lock ∝ a⁶/(M★² · R_p⁵). Close-in planets get penalized for permanent day/night split. |
-| **Eccentricity** | 0.15 | exp(−2.057 · e²). High eccentricity → extreme seasonal temperature swings. |
-| **Stellar age** | 0.10 | Inverse-sqrt activity proxy. Young stars are magnetically active. |
+| **XUV Escape (Retention)** | 0.45 | Energy-limited hydrodynamic escape over time (Luger & Barnes 2015). Atmosphere stripping is the primary failure mode for habitable-zone planets around active M dwarfs. |
+| **Tidal locking** | 0.30 | Timescale proxy $\tau_{\text{lock}} \propto a^6 / (M_\star^2 R_p^5)$. Close-in planets are penalized for severe permanent day/night temperature splits. |
+| **Eccentricity** | 0.15 | $\exp(-2.057 \cdot e^2)$. High orbital eccentricity drives extreme seasonal climate instability. |
+| **Stellar age** | 0.10 | Inverse-sqrt magnetic activity proxy. Young stars drive violent coronal mass ejections and flare activity. |
 
-All sub-scores are floored at 0.2 — no single missing parameter can zero out the composite.
+**Bayesian Population Priors:**  
+To prevent uncharacterized exoplanets from artificially inflating their safety scores by omitting missing observational values, missing dimensions shrink to empirical population priors rather than dropping from the weighted average:
+- `xuv_escape_score`: $0.50$
+- `tidal_lock_score`: $0.35$
+- `ecc_score`: $0.70$
+- `age_score`: $0.60$
 
 </details>
 
-**Composite:** &ensp; `0.70 × similarity + 0.30 × risk`
+<details>
+<summary><b>Stage 3 — Terrestrial Surface Gate ($P_{\text{rocky}}$)</b> &nbsp;·&nbsp; <i>click to expand</i></summary>
 
-The composite correlation against UPR is expected to be *lower* than the similarity-only correlation — that's the point. The risk track deliberately down-ranks planets lacking long-term thermal retention that standard ESI overrates.
+<br>
+
+A planet cannot be habitable if it lacks a distinct liquid/solid interface. Under the Fulton et al. (2017) radius valley, Rogers (2015), and Zeng et al. (2019) composition models, planets above $1.8\,R_\oplus$ almost universally retain volatile hydrogen/helium gas envelopes (mini-Neptunes).
+
+We implement an explicit logistic surface gate:
+
+$$P_{\text{rocky}}(R_p, M_p) = \frac{1}{1 + \exp\left(\frac{R_p - 1.80\,R_\oplus}{0.12}\right)}$$
+
+- **Density check**: When measured mass is present, if bulk density $\rho = M_p / R_p^3 \ge 0.8\,\rho_\oplus$ and $R_p \le 1.8\,R_\oplus$, $P_{\text{rocky}} = 0.95$. If $\rho < 0.5\,\rho_\oplus$, the planet is heavily penalized via a steep gas-envelope gate centered at $1.50\,R_\oplus$.
+- This surface gate directly resolves false positives where gaseous sub-Neptunes (such as K2-332 b or Kepler-22 b) ranked high merely because their equilibrium temperatures matched Earth's.
+
+</details>
+
+$$\mathbf{\text{Composite Habitability}} = \Big(0.70 \cdot \text{ESI} + 0.30 \cdot \text{Safety}\Big) \times P_{\text{rocky}}(R_p, M_p)$$
+
+- **Uncertainty Propagation**: Every score includes a 100-trial Monte Carlo IQR ($\pm \text{IQR} = Q_{75} - Q_{25}$) sampled over measured radius and mass parameter error distributions.
+- **Provenance & Imputation**: Planets lacking measured masses fall back to empirical mass-radius relations ($M \sim R^{3.5}$ for rocky / $M \sim R^{2.06}$ for gaseous) and are explicitly flagged with a `Mass Imputed` badge.
 
 <br>
 
@@ -257,25 +280,71 @@ flowchart LR
 
 ---
 
-## 📊 Decision Layer (Discovery Indices)
+## 📊 Decision Layer (Three Decoupled Discovery Indices)
 
-Rather than conflating physical properties, observational metrics, and post-hoc data into a single circular metric, the platform explicitly separates triage into three distinct indices computed in `mv_discovery_scores`:
+Rather than conflating physical properties, observational constraints, and post-hoc observational data into a single circular metric, the platform explicitly separates triage into three independent, uncoupled indices stored in `mv_discovery_scores`:
 
 ```mermaid
-pie title The Three Discovery Indices
+pie title The Three Decoupled Discovery Indices
     "Physical Triage (Habitability - Anomaly)" : 40
     "Observability (Geometric SNR)" : 30
     "Characterization (Spectra + Biosigs)" : 30
 ```
 
-| Index | Formulation | Purpose |
-|:---|:---|:---|
-| **Physical Triage** | Habitability composite × 40 − anomaly penalty | Measures *intrinsic physical interest* prior to any observation bias. |
-| **Observability** | log₁₀((R_p/R_s)² / d²) proxy, 0–100 scaled | Measures *how easy* the planet is to observe (transit depth & distance). |
-| **Characterization** | Biosignatures + spectra availability (Data Quality) | Measures *what we have already learned* post-observation. |
+### 1. Physical Triage Index ($0 - 100$)
+Measures **intrinsic physical habitability and dynamical stability** prior to any observation bias:
 
-> **Why three indices?**  
-> We empirically falsified the monolithic "Discovery Score". Our Path B study demonstrated that physical habitability *does not predict* JWST follow-up (OR ≈ 1.03 after outlier removal). JWST follow-up is almost entirely driven by the **Observability** proxy. Combining them creates a tautology where the score predicts JWST time only because it includes JWST data. Separating them is the only honest way to rank targets.
+$$\text{Physical Triage} = \text{clamp}\left(0, 100, \left[\text{Composite Habitability} \times 40 - \min(N_{\text{anomalies}} \times 3.0, 10)\right] \times \frac{100}{40}\right)$$
+
+- Grounded in physical properties ($R_p$, $M_p$, $T_{\text{eq}}$, $S_{\text{eff}}$, orbital architecture).
+- Gated by $P_{\text{rocky}}(R_p, M_p)$ to filter out volatile sub-Neptune envelopes.
+- Downweighted by physical anomalies (e.g., extreme density outliers, super-eccentric short periods).
+
+### 2. Observability Index ($0 - 100$)
+Measures **how feasible the planet is to observe spectroscopically** (transmission SNR proxy) without regard to habitability:
+
+$$\text{SNR}_{\text{geom}} = \log_{10}\left( \frac{(R_p / [R_\star \times 109.2])^2}{d_{\text{pc}}^2} \right)$$
+
+$$\text{Observability} = \text{clamp}\left(0, 100, \Big[\max(\text{SNR}_{\text{geom}}, -10) + 10\Big] \times \frac{100}{7.0}\right)$$
+
+- Follows the geometric scaling of transmission spectroscopy metric (TSM) formulations (Kempton et al. 2018).
+- Scaled such that prime targets (e.g., HD 209458 b with $\text{SNR}_{\text{geom}} \approx -2.5$) score $\approx 100$, while distant or faint targets ($\le -10$) score $0$.
+
+### 3. Characterization Index ($0 - 100$)
+Measures **what the astronomical community has already verified** post-observation:
+
+$$\text{Characterization} = \text{clamp}\left(0, 100, \Big[\min(\text{Biosig Score}, 25) + \text{Data Quality Score}\Big] \times \frac{100}{40}\right)$$
+
+- **Biosig Score** ($0 - 25$): Weighted by the count of $\ge 3\sigma$ HITRAN molecular detections scaled by signal significance:
+  $$\text{Biosig Score} = N_{\ge 3\sigma} \times 5.0 \times \left(0.5 + 0.5 \times \frac{\min(\overline{\sigma}, 10.0)}{5.0}\right)$$
+- **Data Quality Score** ($0 - 15$): Spectra presence ($+5$), best instrument tier ($+5$ for JWST, $+3.5$ for HST, $+2$ for other), and parameter completeness ($+1$ each for $R_p, M_p, P, T_{\text{eq}}, a$).
+
+---
+
+### Legacy Composite Discovery Score ($0 - 100$)
+For backward compatibility and unified holistic ranking, the legacy Discovery Score combines all dimensions:
+
+$$\text{Discovery Score} = \text{clamp}\left(0, 100, 40 \cdot \text{Hab} + 25 \cdot \text{Bio} + 15 \cdot \text{DataQual} + 10 \cdot \text{Orbital} - 10 \cdot \text{Anom}\right)$$
+
+> **Why decouple the three indices?**  
+> In our empirical validation against JWST Cycles 1–3 target allocations, physical habitability *does not predict* telescope time allocation (odds ratio $\text{OR} \approx 1.03$). JWST target selection is almost entirely driven by the **Observability** index (TSM/transit depth/host brightness). When habitability and data quality were merged into a single number, the score falsely appeared to "predict" JWST targets simply because targets already observed by JWST received high data quality points (circular tautology). Decoupling them provides an honest, actionable triage framework for astronomical proposals.
+
+---
+
+## 🖥 Platform & Observatory UI Features
+
+- **7-Axis Calibrated Radar Telemetry**:  
+  Visualizes planetary health profiles with an explicitly pinned $[0, 1]$ radial domain ($0\%$ center, $100\%$ outer rim) across **Radius ESI**, **Mass ESI**, **Equilibrium Temperature**, **Habitable Zone Proximity**, **Tidal Locking Safety**, **XUV Atmospheric Retention**, and **Orbital Eccentricity**.
+- **Interactive 3D Star Map**:  
+  WebGL/Three.js starfield mapping confirmed hosts in galactic coordinates with habitability clustering.
+- **Atmospheric Spectrum & HITRAN Template Cross-Correlation**:  
+  Interactive transmission spectrum viewer matching observational points against laboratory molecular absorption lines with scale-height filters and stellar contamination corrections.
+- **PLATON Bayesian Retrieval Posterior Viewer**:  
+  Displays nested sampling posterior distribution curves for atmospheric parameters ($T_{\text{surf}}$, metallicity, C/O ratio, cloud pressure).
+- **Multi-System Orbital Architectures & Hill Stability Predictor**:  
+  Interactive layout of multi-planet systems showing confirmed planets alongside dynamically stable predicted orbital gaps.
+- **Modern Minimalist Observatory Aesthetic**:  
+  Engineered for dark astronomical environments with high-contrast data tables, monospace numerical readouts, and zero generic decorative gradients.
 
 ---
 
