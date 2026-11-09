@@ -184,12 +184,10 @@ export default function Dashboard() {
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
               <div>
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[11px] font-mono uppercase tracking-wider text-cyan-400">
+                  <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400">
                     Highest Ranked Target
                   </span>
-                  <Badge variant="outline" className="border-cyan-500/30 text-cyan-400 bg-cyan-950/20 text-[10px] font-mono">
-                    P_rocky = 0.95
-                  </Badge>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-[4px] border border-zinc-800 bg-zinc-900/60 text-zinc-300 text-[10px] font-mono">P_rocky = 0.95</span>
                 </div>
                 <Link to={`/planets/${encodeURIComponent(target.planet_name)}`} className="group inline-flex items-center gap-2">
                   <h2 className="text-3xl font-medium tracking-tight text-white group-hover:underline">
@@ -205,22 +203,31 @@ export default function Dashboard() {
               {/* Minimal Three-Tier Index Badges */}
               <div className="flex items-center gap-6 border-t md:border-t-0 md:border-l border-zinc-800 pt-4 md:pt-0 md:pl-6">
                 <div>
-                  <div className="text-2xl font-mono font-medium text-cyan-400">
+                  <div className="text-2xl font-mono font-medium text-zinc-100">
                     {target.observability_index != null ? target.observability_index.toFixed(1) : '78.7'}
                   </div>
-                  <p className="text-[10px] uppercase font-mono tracking-wider text-zinc-500">Observability</p>
+                  <p className="text-[10px] uppercase font-mono tracking-wider text-zinc-400 flex items-center gap-1.5 mt-0.5">
+                    <span className="size-1.5 rounded-full bg-sky-400" />
+                    <span>Observability</span>
+                  </p>
                 </div>
                 <div>
-                  <div className="text-2xl font-mono font-medium text-emerald-400">
+                  <div className="text-2xl font-mono font-medium text-zinc-100">
                     {target.physical_triage_index != null ? target.physical_triage_index.toFixed(1) : '77.2'}
                   </div>
-                  <p className="text-[10px] uppercase font-mono tracking-wider text-zinc-500">Physical Triage</p>
+                  <p className="text-[10px] uppercase font-mono tracking-wider text-zinc-400 flex items-center gap-1.5 mt-0.5">
+                    <span className="size-1.5 rounded-full bg-emerald-400" />
+                    <span>Physical Triage</span>
+                  </p>
                 </div>
                 <div>
-                  <div className="text-2xl font-mono font-medium text-purple-400">
+                  <div className="text-2xl font-mono font-medium text-zinc-100">
                     {target.characterization_index != null ? target.characterization_index.toFixed(1) : '100.0'}
                   </div>
-                  <p className="text-[10px] uppercase font-mono tracking-wider text-zinc-500">Characterization</p>
+                  <p className="text-[10px] uppercase font-mono tracking-wider text-zinc-400 flex items-center gap-1.5 mt-0.5">
+                    <span className="size-1.5 rounded-full bg-indigo-400" />
+                    <span>Characterization</span>
+                  </p>
                 </div>
               </div>
             </div>
@@ -260,13 +267,11 @@ export default function Dashboard() {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <Sparkles className="size-4 text-cyan-400" />
+                <Telescope className="size-4 text-zinc-400" />
                 <CardTitle className="text-sm font-mono uppercase tracking-wider text-white">
                   Observation &amp; Proposal Intelligence
                 </CardTitle>
-                <Badge variant="outline" className="border-cyan-500/30 text-cyan-400 bg-cyan-950/20 text-[10px] font-mono">
-                  Cycles 4–5 &amp; ELT Targets
-                </Badge>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-[4px] border border-zinc-800 bg-zinc-900/60 text-zinc-300 text-[10px] font-mono">Cycles 4–5 &amp; ELT Targets</span>
               </div>
               <CardDescription className="text-xs text-zinc-400 mt-1 max-w-2xl">
                 High-priority terrestrial candidates ranked by uncoupled Physical Triage (P_rocky &times; ESI) 
@@ -314,22 +319,26 @@ export default function Dashboard() {
                         {p.p_rocky}
                       </Badge>
                     </TableCell>
-                    <TableCell className="w-[110px] whitespace-nowrap text-right text-cyan-400 font-semibold">
+                    <TableCell className="w-[110px] whitespace-nowrap text-right text-zinc-200 font-mono font-medium">
                       {p.obs_index.toFixed(1)}
                     </TableCell>
-                    <TableCell className="w-[110px] whitespace-nowrap text-right text-emerald-400 font-semibold">
+                    <TableCell className="w-[110px] whitespace-nowrap text-right text-zinc-200 font-mono font-medium">
                       {p.triage_index.toFixed(1)}
                     </TableCell>
                     <TableCell className="min-w-[320px] text-zinc-400 font-sans text-xs leading-relaxed pr-4">
                       {p.science_case}
                     </TableCell>
                     <TableCell className="w-[140px] whitespace-nowrap text-center shrink-0">
-                      <Badge 
-                        variant="outline" 
-                        className={`text-[10px] ${p.urgency === 'HIGH PRIORITY' ? 'border-emerald-500/40 text-emerald-400 bg-emerald-950/20' : p.urgency === 'ELT TARGET' ? 'border-purple-500/40 text-purple-400 bg-purple-950/20' : 'border-cyan-500/40 text-cyan-400 bg-cyan-950/20'}`}
-                      >
-                        {p.urgency}
-                      </Badge>
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] border border-zinc-800 bg-zinc-900/60 text-[10px] font-mono text-zinc-300">
+                        <span className={`size-1.5 rounded-full ${
+                          p.urgency === 'HIGH PRIORITY' 
+                            ? 'bg-emerald-400' 
+                            : p.urgency === 'ELT TARGET' 
+                              ? 'bg-indigo-400' 
+                              : 'bg-sky-400'
+                        }`} />
+                        <span>{p.urgency}</span>
+                      </span>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -343,7 +352,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="border border-zinc-800/80 rounded-xl bg-zinc-950/50 p-5 space-y-2">
           <div className="flex items-center gap-2 text-xs font-mono text-zinc-300">
-            <Scale className="size-4 text-cyan-400" />
+            <Scale className="size-4 text-zinc-400" />
             <span className="font-medium">Fulton Radius Valley Gate</span>
           </div>
           <p className="text-xs text-zinc-400 leading-relaxed">
@@ -353,7 +362,7 @@ export default function Dashboard() {
 
         <div className="border border-zinc-800/80 rounded-xl bg-zinc-950/50 p-5 space-y-2">
           <div className="flex items-center gap-2 text-xs font-mono text-zinc-300">
-            <ShieldCheck className="size-4 text-emerald-400" />
+            <ShieldCheck className="size-4 text-zinc-400" />
             <span className="font-medium">Decoupled Decision Layer</span>
           </div>
           <p className="text-xs text-zinc-400 leading-relaxed">
@@ -363,7 +372,7 @@ export default function Dashboard() {
 
         <div className="border border-zinc-800/80 rounded-xl bg-zinc-950/50 p-5 space-y-2">
           <div className="flex items-center gap-2 text-xs font-mono text-zinc-300">
-            <Orbit className="size-4 text-amber-400" />
+            <Orbit className="size-4 text-zinc-400" />
             <span className="font-medium">N-Body Symplectic MEGNO</span>
           </div>
           <p className="text-xs text-zinc-400 leading-relaxed">
@@ -373,7 +382,7 @@ export default function Dashboard() {
 
         <div className="border border-zinc-800/80 rounded-xl bg-zinc-950/50 p-5 space-y-2">
           <div className="flex items-center gap-2 text-xs font-mono text-zinc-300">
-            <Activity className="size-4 text-purple-400" />
+            <Activity className="size-4 text-zinc-400" />
             <span className="font-medium">Abiotic False-Positive Logic</span>
           </div>
           <p className="text-xs text-zinc-400 leading-relaxed">

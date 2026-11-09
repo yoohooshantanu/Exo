@@ -167,10 +167,7 @@ export default function Validation() {
       {/* ── Page Header ─────────────────────────────────────────────── */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-800/80 pb-6">
         <div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-950/20 px-3 py-1 text-xs font-mono text-emerald-400 mb-2">
-            <CheckCircle2 className="size-3.5" />
-            <span>Peer-Reviewed Validation Suite &bull; All 4 Tracks Passing</span>
-          </div>
+          <div className="inline-flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/80 px-3 py-1 text-xs font-mono text-zinc-300 mb-2"><span className="size-1.5 rounded-full bg-emerald-400" /><span>Peer-Reviewed Validation Suite &bull; All 4 Tracks Passing</span></div>
           <h1 className="text-3xl font-medium tracking-tight text-white">
             Scientific Validation &amp; Allocation Study
           </h1>
@@ -195,7 +192,7 @@ export default function Validation() {
           <CardHeader className="pb-1 pt-4 px-5">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider">UPR Benchmark</span>
-              <Scale className="size-4 text-emerald-400" />
+              <Scale className="size-4 text-zinc-400" />
             </div>
             <CardTitle className="text-2xl font-mono font-medium text-white mt-1">r = 0.772</CardTitle>
           </CardHeader>
@@ -208,7 +205,7 @@ export default function Validation() {
           <CardHeader className="pb-1 pt-4 px-5">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider">Observability Power</span>
-              <Telescope className="size-4 text-cyan-400" />
+              <Telescope className="size-4 text-zinc-400" />
             </div>
             <CardTitle className="text-2xl font-mono font-medium text-white mt-1">OR = 2.79</CardTitle>
           </CardHeader>
@@ -221,7 +218,7 @@ export default function Validation() {
           <CardHeader className="pb-1 pt-4 px-5">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider">Decoupled Purity</span>
-              <ShieldCheck className="size-4 text-purple-400" />
+              <ShieldCheck className="size-4 text-zinc-400" />
             </div>
             <CardTitle className="text-2xl font-mono font-medium text-white mt-1">OR = 1.03</CardTitle>
           </CardHeader>
@@ -234,7 +231,7 @@ export default function Validation() {
           <CardHeader className="pb-1 pt-4 px-5">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider">Control Group</span>
-              <CheckCircle2 className="size-4 text-emerald-400" />
+              <CheckCircle2 className="size-4 text-zinc-400" />
             </div>
             <CardTitle className="text-2xl font-mono font-medium text-white mt-1">100% Pass</CardTitle>
           </CardHeader>
@@ -275,7 +272,7 @@ export default function Validation() {
           <Card className="border border-zinc-800/80 bg-zinc-950/60 rounded-xl">
             <CardHeader className="pb-3 border-b border-zinc-800/60">
               <div className="flex items-center gap-2">
-                <BookOpen className="size-4 text-cyan-400" />
+                <BookOpen className="size-4 text-zinc-400" />
                 <CardTitle className="text-sm font-medium text-white">
                   De-Circularized Follow-Up Study: Why We Decoupled the Decision Layer
                 </CardTitle>
@@ -314,14 +311,14 @@ export default function Validation() {
                     Multivariate Logistic Regression Model
                   </h4>
                   <p className="text-[11px] text-zinc-400 font-sans leading-relaxed">
-                    Model: <code className="text-cyan-300 font-mono">Logit(is_jwst_target ~ Observability_z + Habitability_z)</code>
+                    Model: <code className="text-zinc-200 font-mono bg-zinc-900/80 px-1.5 py-0.5 rounded border border-zinc-800">Logit(is_jwst_target ~ Observability_z + Habitability_z)</code>
                   </p>
                   
                   <div className="space-y-3 pt-2">
                     <div className="flex justify-between items-center border-b border-zinc-800 pb-2">
                       <span className="text-zinc-400">Observability Proxy (z)</span>
                       <div className="text-right">
-                        <span className="text-emerald-400 font-semibold">OR = 2.79</span>
+                        <span className="text-zinc-100 font-mono font-medium">OR = 2.79</span>
                         <span className="text-[10px] text-zinc-400 ml-2">(p &lt; 10⁻¹⁴)</span>
                       </div>
                     </div>
@@ -381,11 +378,11 @@ export default function Validation() {
                           <TableCell className="text-zinc-400">{row.type}</TableCell>
                           <TableCell className="text-zinc-400 text-[11px]">{row.program}</TableCell>
                           <TableCell className="text-zinc-300 font-sans text-xs">
-                            <span className="font-mono text-cyan-300">{row.species}</span>
+                            <span className="font-mono text-zinc-200">{row.species}</span>
                             <p className="text-[11px] text-zinc-400 mt-0.5">{row.note}</p>
                           </TableCell>
                           <TableCell className="text-center">
-                            <Badge variant="outline" className="border-emerald-500/30 text-emerald-400 bg-emerald-950/20 text-[10px]">
+                            <Badge variant="outline" className="border-zinc-800 text-zinc-300 bg-zinc-900/60 text-[10px]">
                               {row.agreement}
                             </Badge>
                           </TableCell>
@@ -406,12 +403,12 @@ export default function Validation() {
             <CardHeader className="pb-3 border-b border-zinc-800/60">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <ShieldCheck className="size-4 text-emerald-400" />
+                  <ShieldCheck className="size-4 text-zinc-300" />
                   <CardTitle className="text-sm font-medium text-white">
                     Solar System Sanity Controls (Zero-Point Calibration)
                   </CardTitle>
                 </div>
-                <Badge variant="outline" className="border-emerald-500/30 text-emerald-400 bg-emerald-950/20 text-[10px] font-mono">
+                <Badge variant="outline" className="border-zinc-800 text-zinc-300 bg-zinc-900/60 text-[10px] font-mono">
                   All 4 Controls Passed
                 </Badge>
               </div>
@@ -437,10 +434,10 @@ export default function Validation() {
                       <TableCell className="font-medium text-white">{ctrl.planet}</TableCell>
                       <TableCell className="text-right text-zinc-300">{ctrl.sim.toFixed(3)}</TableCell>
                       <TableCell className="text-right text-zinc-300">{ctrl.safety.toFixed(3)}</TableCell>
-                      <TableCell className="text-right font-semibold text-emerald-400">{ctrl.composite.toFixed(3)}</TableCell>
+                      <TableCell className="text-right font-semibold text-zinc-300">{ctrl.composite.toFixed(3)}</TableCell>
                       <TableCell className="text-zinc-400 font-sans text-xs">{ctrl.rationale}</TableCell>
                       <TableCell className="text-center">
-                        <Badge variant="outline" className="border-emerald-500/30 text-emerald-400 bg-emerald-950/20 text-[10px]">
+                        <Badge variant="outline" className="border-zinc-800 text-zinc-300 bg-zinc-900/60 text-[10px]">
                           PASS
                         </Badge>
                       </TableCell>
@@ -465,7 +462,7 @@ export default function Validation() {
                   </CardDescription>
                 </div>
                 <div className="text-right font-mono">
-                  <span className="text-sm text-emerald-400 font-semibold">r = 0.772</span>
+                  <span className="text-sm text-zinc-100 font-mono font-medium">r = 0.772</span>
                   <p className="text-[10px] text-zinc-400 uppercase">Target: r ≥ 0.70</p>
                 </div>
               </div>
@@ -494,12 +491,12 @@ export default function Validation() {
                         </TableCell>
                         <TableCell className="text-right text-zinc-200">{row.ours.toFixed(3)}</TableCell>
                         <TableCell className="text-right text-zinc-400">{row.published.toFixed(3)}</TableCell>
-                        <TableCell className={`text-right ${row.delta.startsWith('+') ? 'text-cyan-400' : 'text-amber-400'}`}>
+                        <TableCell className={`text-right ${row.delta.startsWith('+') ? 'text-zinc-400' : 'text-amber-400'}`}>
                           {row.delta}
                         </TableCell>
                         <TableCell className="text-zinc-400 font-sans text-xs">{row.note}</TableCell>
                         <TableCell className="text-center">
-                          <Badge variant="outline" className="border-emerald-500/30 text-emerald-400 bg-emerald-950/20 text-[10px]">
+                          <Badge variant="outline" className="border-zinc-800 text-zinc-300 bg-zinc-900/60 text-[10px]">
                             {row.status}
                           </Badge>
                         </TableCell>
@@ -521,7 +518,7 @@ export default function Validation() {
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-xs font-mono uppercase tracking-wider text-zinc-400 flex items-center gap-2">
-                    <FlaskConical className="size-3.5 text-cyan-400" />
+                    <FlaskConical className="size-3.5 text-zinc-400" />
                     Biosignature Detections by Molecule
                   </CardTitle>
                   <Badge variant="outline" className="text-[10px] font-mono border-zinc-800 text-zinc-400">
@@ -581,7 +578,7 @@ export default function Validation() {
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-xs font-mono uppercase tracking-wider text-zinc-400 flex items-center gap-2">
-                    <Target className="size-3.5 text-emerald-400" />
+                    <Target className="size-3.5 text-zinc-300" />
                     Habitability Score Distribution
                   </CardTitle>
                   <Badge variant="outline" className="text-[10px] font-mono border-zinc-800 text-zinc-400">

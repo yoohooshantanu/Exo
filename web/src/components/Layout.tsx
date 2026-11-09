@@ -15,9 +15,9 @@ export default function Layout() {
   const isStarMap = pathname === '/stars'
 
   return (
-    <div className="min-h-screen bg-[#07070a] text-zinc-200 antialiased selection:bg-zinc-800 selection:text-white flex flex-col font-sans">
+    <div className="min-h-screen bg-[#090b10] text-zinc-200 antialiased selection:bg-zinc-800 selection:text-white flex flex-col font-sans">
       {/* Modern High-Precision Top Header */}
-      <header className="sticky top-0 z-50 h-13 border-b border-zinc-800/80 bg-[#07070a]/90 backdrop-blur-xl px-4 sm:px-6">
+      <header className="sticky top-0 z-50 h-13 border-b border-zinc-800/80 bg-[#090b10]/90 backdrop-blur-xl px-4 sm:px-6">
         <div className="max-w-7xl mx-auto h-full flex items-center justify-between gap-6">
           {/* Logo / Brand */}
           <Link to="/" className="flex items-center gap-3 shrink-0 group">

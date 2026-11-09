@@ -81,14 +81,8 @@ export function ModernHero({ totalPlanets }: ModernHeroProps) {
         {/* Left Column: Mission Description */}
         <div className="lg:col-span-7 space-y-4">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-950/20 px-2.5 py-0.5 text-xs font-mono text-cyan-400">
-              <span className="size-1.5 rounded-full bg-cyan-400 animate-pulse" />
-              <span>Observatory Target Prioritization Engine</span>
-            </div>
-            <div className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-950/20 px-2.5 py-0.5 text-xs font-mono text-emerald-400">
-              <ShieldCheck className="size-3" />
-              <span>JWST Allocation Validated</span>
-            </div>
+            <div className="inline-flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/80 px-2.5 py-1 text-xs font-mono text-zinc-300"><span className="size-1.5 rounded-full bg-sky-400" /><span>Observatory Target Prioritization Engine</span></div>
+            <div className="inline-flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900/80 px-2.5 py-1 text-xs font-mono text-zinc-300"><span className="size-1.5 rounded-full bg-emerald-400" /><span>JWST Allocation Validated</span></div>
           </div>
 
           <h1 className="text-3xl sm:text-4xl lg:text-5xl font-medium tracking-tight text-white leading-tight">
@@ -125,7 +119,7 @@ export function ModernHero({ totalPlanets }: ModernHeroProps) {
         <div className="lg:col-span-5 border border-zinc-800/80 rounded-lg bg-zinc-900/30 p-5 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-xs font-mono text-zinc-400">
-              <Sparkles className="size-3 text-cyan-400" />
+              <Telescope className="size-3 text-zinc-400" />
               <span>Featured Follow-Up Target</span>
             </div>
             <button
@@ -160,19 +154,28 @@ export function ModernHero({ totalPlanets }: ModernHeroProps) {
             {/* Three Decoupled Indices Display */}
             <div className="grid grid-cols-3 gap-2 pt-2 border-t border-zinc-800/60 font-mono text-xs">
               <div className="p-2 rounded bg-zinc-950/60 border border-zinc-800/50">
-                <span className="text-[10px] uppercase tracking-wider text-zinc-500 block">Observability</span>
-                <span className="text-base font-medium text-cyan-400">{planet.obs.toFixed(1)}</span>
-                <span className="text-[9px] text-zinc-400 block mt-0.5">Geometric SNR</span>
+                <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-zinc-400">
+                  <span className="size-1.5 rounded-full bg-sky-400/90" />
+                  <span>Observability</span>
+                </div>
+                <span className="text-base font-medium text-zinc-100 mt-0.5 block">{planet.obs.toFixed(1)}</span>
+                <span className="text-[9px] text-zinc-500 block">Geometric SNR</span>
               </div>
               <div className="p-2 rounded bg-zinc-950/60 border border-zinc-800/50">
-                <span className="text-[10px] uppercase tracking-wider text-zinc-500 block">Physical Triage</span>
-                <span className="text-base font-medium text-emerald-400">{planet.triage.toFixed(1)}</span>
-                <span className="text-[9px] text-zinc-400 block mt-0.5">P_rocky &times; ESI</span>
+                <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-zinc-400">
+                  <span className="size-1.5 rounded-full bg-emerald-400/90" />
+                  <span>Physical Triage</span>
+                </div>
+                <span className="text-base font-medium text-zinc-100 mt-0.5 block">{planet.triage.toFixed(1)}</span>
+                <span className="text-[9px] text-zinc-500 block">P_rocky &times; ESI</span>
               </div>
               <div className="p-2 rounded bg-zinc-950/60 border border-zinc-800/50">
-                <span className="text-[10px] uppercase tracking-wider text-zinc-500 block">Characterized</span>
-                <span className="text-base font-medium text-purple-400">{planet.char.toFixed(1)}</span>
-                <span className="text-[9px] text-zinc-400 block mt-0.5">HITRAN Spectra</span>
+                <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-zinc-400">
+                  <span className="size-1.5 rounded-full bg-indigo-400/90" />
+                  <span>Characterized</span>
+                </div>
+                <span className="text-base font-medium text-zinc-100 mt-0.5 block">{planet.char.toFixed(1)}</span>
+                <span className="text-[9px] text-zinc-500 block">HITRAN Spectra</span>
               </div>
             </div>
 
