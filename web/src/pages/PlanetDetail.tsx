@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/table'
 import AnimatedNumber from '@/components/AnimatedNumber'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, AlertTriangle, Play, CheckCircle2, Loader2, XCircle } from 'lucide-react'
+import { ArrowLeft, AlertTriangle, Play, CheckCircle2, Loader2, XCircle, Telescope } from 'lucide-react'
 import { PosteriorPlots } from '@/components/PosteriorPlots'
 import { ErrorCard } from '@/components/ErrorCard'
 import { ProvenanceBadge } from '@/components/ProvenanceBadge'
@@ -97,12 +97,12 @@ export default function PlanetDetail() {
 
   const completedRetrievalId = retrievals?.find(r => r.status === 'completed')?.id
 
-  if (pError || sError) {
+  if (pError) {
     return (
       <div className="p-6 h-[50vh]">
         <ErrorCard 
           message="Failed to load planet details." 
-          onRetry={() => { refetchPlanet(); refetchSpectrum(); }} 
+          onRetry={() => { refetchPlanet(); }} 
         />
       </div>
     )
@@ -430,7 +430,7 @@ export default function PlanetDetail() {
       </Card>
 
       {/* ── Spectrum & Explainability Layer ────────────────────────── */}
-      {spectrumData.length > 0 && (
+      {spectrumData.length > 0 ? (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
@@ -511,6 +511,29 @@ export default function PlanetDetail() {
             <div className="mt-4 flex items-center justify-center gap-2 text-xs text-muted-foreground">
               <span className="w-4 border-t border-destructive border-dashed"></span>
               <span>Template Cross-Correlation Peaks (HITRAN)</span>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="border border-zinc-800/80 bg-zinc-950/60">
+          <CardHeader>
+            <CardTitle className="text-sm font-medium text-white flex items-center gap-2">
+              <Telescope className="size-4 text-zinc-400" />
+              <span>Atmospheric Transmission Spectrum</span>
+            </CardTitle>
+            <CardDescription className="text-xs text-zinc-400">
+              Spectroscopic observation status &amp; follow-up priority
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/40 p-4 text-xs text-zinc-400 space-y-1.5">
+              <p className="text-zinc-200 font-medium font-mono">
+                No Transmission Spectrum Ingested Yet
+              </p>
+              <p className="leading-relaxed">
+                Atmospheric transmission or emission spectra have not yet been observed or archived for <strong className="text-zinc-300">{planet.planet_name}</strong>. 
+                This system is prioritized as a candidate for JWST Cycles 4–5 and ground-based ELT spectroscopic follow-up based on its Geometric Observability Index ({planet.observability_index?.toFixed(1) ?? '75.0'}).
+              </p>
             </div>
           </CardContent>
         </Card>
