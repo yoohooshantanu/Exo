@@ -186,7 +186,7 @@ export default function PlanetDetail() {
                       ? planet.observability_index.toFixed(1)
                       : (planet.score_breakdown?.data_quality != null
                           ? Math.min(100, (planet.score_breakdown.data_quality * 5.0 + 35)).toFixed(1)
-                          : '75.0')}
+                          : '—')}
                   </div>
                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1" title="Geometric SNR / TSM-style proxy">Observability</p>
                 </div>
@@ -196,7 +196,7 @@ export default function PlanetDetail() {
                       ? planet.physical_triage_index.toFixed(1)
                       : (planet.score_breakdown?.habitability != null
                           ? Math.max(0, planet.score_breakdown.habitability + (planet.score_breakdown.anomaly_penalty || 0)).toFixed(1)
-                          : '70.0')}
+                          : '—')}
                   </div>
                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1" title="Habitability − Anomaly Penalty">Physical Triage</p>
                 </div>
@@ -206,7 +206,7 @@ export default function PlanetDetail() {
                       ? planet.characterization_index.toFixed(1)
                       : (planet.score_breakdown?.biosignature != null
                           ? Math.min(100, Math.max(0, planet.score_breakdown.biosignature * 3.5 + 25)).toFixed(1)
-                          : '80.0')}
+                          : '—')}
                   </div>
                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1" title="Biosignatures + Data Quality (Post-observation enrichment)">Characterization</p>
                 </div>
@@ -448,7 +448,7 @@ export default function PlanetDetail() {
             onRetry={() => { refetchSpectrum(); }}
           />
         </div>
-      ) : !spectrum || spectrumData.length === 0 ? (
+      ) : !spectrum ? (
         <Card className="border border-zinc-800/80 bg-zinc-950/60">
           <CardHeader>
             <CardTitle className="text-sm font-medium text-white flex items-center gap-2">
@@ -456,7 +456,7 @@ export default function PlanetDetail() {
               <span>Atmospheric Transmission Spectrum</span>
             </CardTitle>
             <CardDescription className="text-xs text-zinc-400">
-              Spectroscopic observation status &amp; follow-up priority
+              Spectroscopic observation archive status
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -465,8 +465,34 @@ export default function PlanetDetail() {
                 No Transmission Spectrum Ingested Yet
               </p>
               <p className="leading-relaxed">
-                No transmission spectrum is currently ingested in the Exo database for this target. 
-                This system is prioritized as a candidate for JWST Cycles 4–5 and ground-based ELT spectroscopic follow-up based on its Geometric Observability Index ({planet.observability_index?.toFixed(1) ?? '75.0'}).
+                No transmission spectrum is currently ingested in the Exo database for this target.
+                {planet.observability_index != null ? (
+                  <> Geometric Observability Index: <strong className="text-zinc-300 font-mono">{planet.observability_index.toFixed(1)}</strong>.</>
+                ) : (
+                  <> Observability Index: <span className="font-mono text-zinc-400">N/A</span>.</>
+                )}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : spectrumData.length === 0 ? (
+        <Card className="border border-zinc-800/80 bg-zinc-950/60">
+          <CardHeader>
+            <CardTitle className="text-sm font-medium text-white flex items-center gap-2">
+              <Telescope className="size-4 text-zinc-400" />
+              <span>Atmospheric Transmission Spectrum</span>
+            </CardTitle>
+            <CardDescription className="text-xs text-zinc-400">
+              {spectrum.instrument || 'Unknown instrument'} / {spectrum.facility || 'Unknown facility'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/40 p-4 text-xs text-zinc-400 space-y-1.5">
+              <p className="text-zinc-200 font-medium font-mono">
+                No Spectral Points Available
+              </p>
+              <p className="leading-relaxed">
+                Spectrum record available ({spectrum.spec_id}), but no plottable spectral measurements were returned.
               </p>
             </div>
           </CardContent>
@@ -517,8 +543,10 @@ export default function PlanetDetail() {
                       {d.method_notes ? d.method_notes : "No penalties applied. Feature clearly isolated."}
                     </div>
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground mt-2 border-t pt-2 flex justify-between">
-                      <span>Matches: {d.hitran_match_count}</span>
-                      <span>Abiotic logic: {d.abiotic_ruled_out ? "PASS" : "FAIL"}</span>
+                      <span>Template peaks: {d.hitran_match_count ?? 0}</span>
+                      <span>
+                        Abiotic assessment: {d.abiotic_ruled_out === true ? "Ruled out" : d.abiotic_ruled_out === false ? "Not ruled out" : "Not assessed"}
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -551,7 +579,7 @@ export default function PlanetDetail() {
             
             <div className="mt-4 flex items-center justify-center gap-2 text-xs text-muted-foreground">
               <span className="w-4 border-t border-destructive border-dashed"></span>
-              <span>Template Cross-Correlation Peaks (HITRAN)</span>
+              <span>Molecular Reference-Template Markers (HITRAN Cross-Sections)</span>
             </div>
           </CardContent>
         </Card>
