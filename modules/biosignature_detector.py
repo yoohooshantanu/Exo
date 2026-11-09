@@ -47,7 +47,7 @@ Session = sessionmaker(bind=engine)
 # ── constants ────────────────────────────────────────────────────────────────
 
 # Detection significance thresholds
-# Classification: STANDARD VALUE (3σ confirmed is standard in spectroscopy)
+# Classification: STANDARD VALUE (3σ significance required for statistically significant screening candidate)
 # 2σ marginal threshold is used for watchlist candidates pending confirmation
 CONFIRMED_SIGMA  = 3.0   # Tier 1
 MARGINAL_SIGMA   = 2.0   # Tier 2 floor

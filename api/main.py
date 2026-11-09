@@ -802,7 +802,7 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
         SELECT molecule, COUNT(*)::int as total,
                ROUND(AVG(detection_sigma)::numeric, 2) as avg_sigma,
                SUM(CASE WHEN detection_sigma >= 3.0 AND COALESCE(hitran_match_count, 0) >= 3 THEN 1 ELSE 0 END)::int as confirmed,
-               SUM(CASE WHEN detection_sigma >= 2.0 AND detection_sigma < 3.0 AND COALESCE(hitran_match_count, 0) >= 2 THEN 1 ELSE 0 END)::int as marginal
+               SUM(CASE WHEN detection_sigma >= 2.0 AND COALESCE(hitran_match_count, 0) >= 2 AND NOT (detection_sigma >= 3.0 AND COALESCE(hitran_match_count, 0) >= 3) THEN 1 ELSE 0 END)::int as marginal
         FROM molecule_detections GROUP BY molecule ORDER BY total DESC
     """))).fetchall()
 
@@ -824,12 +824,15 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
                SUM(CASE WHEN stability_confidence >= 0.8 AND stability_confidence < 0.9 THEN 1 ELSE 0 END)::int,
                SUM(CASE WHEN stability_confidence < 0.8 THEN 1 ELSE 0 END)::int
         FROM orbital_predictions
-    """))).fetchone()
+        WHERE model_version = :pred_ver
+    """), {"pred_ver": PRED_VERSION})).fetchone()
 
     orb_resonance = (await session.execute(text("""
         SELECT detection_method_hint, COUNT(*)::int
-        FROM orbital_predictions GROUP BY detection_method_hint ORDER BY COUNT(*) DESC
-    """))).fetchall()
+        FROM orbital_predictions
+        WHERE model_version = :pred_ver
+        GROUP BY detection_method_hint ORDER BY COUNT(*) DESC
+    """), {"pred_ver": PRED_VERSION})).fetchall()
 
     orbital = {
         "total_predictions": orb_stats[0] if orb_stats else 0,
@@ -860,8 +863,9 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
             COUNT(*)::int
         FROM habitability_scores
         WHERE composite_score IS NOT NULL
+          AND model_version = :score_ver
         GROUP BY bin ORDER BY bin
-    """))).fetchall()
+    """), {"score_ver": SCORE_VERSION})).fetchall()
 
     habitability = {
         "total_scored": hab_stats[0] if hab_stats else 0,

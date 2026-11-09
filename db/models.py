@@ -416,3 +416,35 @@ class SpectralTemplate(Base):
     __table_args__ = (
         Index("ix_spectral_templates_lookup", "molecule", "temperature_k"),
     )
+
+
+class ValidationRun(Base):
+    __tablename__ = "validation_runs"
+
+    run_id = Column(UUID(as_uuid=False), primary_key=True, server_default=text("gen_random_uuid()"))
+    engine_version = Column(Text, nullable=False)
+    orbital_version = Column(Text, nullable=False)
+    biosig_version = Column(Text, nullable=False)
+    dataset_version = Column(Text, nullable=False)
+    started_at = Column(DateTime(timezone=True), server_default=text("now()"))
+    completed_at = Column(DateTime(timezone=True))
+    total_samples = Column(Integer, server_default="0")
+    status = Column(Text, server_default="completed")
+
+    results = relationship("ValidationResult", back_populates="run", cascade="all, delete-orphan")
+
+
+class ValidationResult(Base):
+    __tablename__ = "validation_results"
+
+    result_id = Column(UUID(as_uuid=False), primary_key=True, server_default=text("gen_random_uuid()"))
+    run_id = Column(UUID(as_uuid=False), ForeignKey("validation_runs.run_id", ondelete="CASCADE"), nullable=False, index=True)
+    benchmark_name = Column(Text, nullable=False)
+    metric_name = Column(Text, nullable=False)
+    expected_value = Column(Float)
+    actual_value = Column(Float)
+    tolerance = Column(Float)
+    sample_count = Column(Integer)
+    status = Column(Text, server_default="PASS")
+
+    run = relationship("ValidationRun", back_populates="results")

@@ -317,7 +317,7 @@ This report synthesizes outputs from all five platform phases:
 1. **Phase 1** (Data Pipeline): NASA Exoplanet Archive + Gaia DR3
 2. **Phase 2** (Habitability): Geometric ESI + risk scoring
 3. **Phase 3** (Orbital Gaps): Mutual Hill radius + REBOUND N-body
-4. **Phase 4** (Biosignatures): HITRAN line matching on JWST/HST spectra
+4. **Phase 4** (Biosignatures): Molecular cross-section template feature screening on JWST/HST spectra
 5. **Phase 5** (Anomaly + Taxonomy): Composition curves, density outliers, HDBSCAN clustering
 
 Cross-module joins identify planets that are simultaneously interesting

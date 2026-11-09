@@ -9,7 +9,9 @@ DISCOVERY_SCORE_SQL = f"""ROUND(GREATEST(0, LEAST((
         COALESCE((
           SELECT COUNT(*) * 5.0 * (0.5 + 0.5 * LEAST(AVG(md.detection_sigma), 10.0) / 5.0)
           FROM molecule_detections md
-          WHERE md.planet_id = p.planet_id AND md.detection_sigma >= 3
+          WHERE md.planet_id = p.planet_id
+            AND md.detection_sigma >= 3.0
+            AND COALESCE(md.hitran_match_count, 0) >= 3
         ), 0)
       , 25)
     + {DATA_QUALITY_SQL}
@@ -381,13 +383,14 @@ SELECT
     mvs.observability_index,
     mvs.physical_triage_index,
     mvs.characterization_index,
-    'Strong Biosignature' AS category,
+    'Screening Candidate' AS category,
     md.molecule AS detail
 FROM molecule_detections md
 JOIN planets p ON md.planet_id = p.planet_id
 JOIN stars s ON p.star_id = s.star_id
 LEFT JOIN mv_discovery_scores mvs ON mvs.planet_id = p.planet_id
 WHERE md.detection_sigma >= 2.0
+  AND COALESCE(md.hitran_match_count, 0) >= 2
 GROUP BY p.planet_id, mvs.discovery_score, mvs.observability_index, mvs.physical_triage_index, mvs.characterization_index, p.planet_name, s.hip_name, s.star_id, md.molecule
 ORDER BY mvs.characterization_index DESC NULLS LAST, MAX(md.detection_sigma) DESC
 LIMIT :limit
@@ -423,14 +426,16 @@ ALERTS = text("""
         s.hip_name AS hostname,
         af.anomaly_type AS detail,
         hs.composite_score AS score,
-        CASE WHEN hs.composite_score > 0.5 THEN 'high' ELSE 'medium' END AS severity,
+        CASE WHEN hs.composite_score >= 0.70 THEN 'high' ELSE 'medium' END AS severity,
         af.flagged_at AS created_at
     FROM anomaly_flags af
     JOIN planets p ON af.planet_id = p.planet_id
     JOIN stars s ON p.star_id = s.star_id
-    LEFT JOIN habitability_scores hs
+    JOIN habitability_scores hs
         ON hs.planet_id = p.planet_id AND hs.model_version = :score_version
     WHERE af.deviation_sigma >= 3.0
+      AND hs.composite_score IS NOT NULL
+      AND hs.composite_score >= 0.60
 )
 UNION ALL
 (
@@ -443,14 +448,25 @@ UNION ALL
         'medium' AS severity,
         tc.run_at AS created_at
     FROM (
-        SELECT DISTINCT ON (planet_id) planet_id, cluster_name, run_at
-        FROM taxonomy_clusters
-        WHERE cluster_label = -1 OR cluster_name NOT IN (
-            'Hot Giant', 'Warm Giant', 'Cold Giant',
-            'Hot Sub-Neptune', 'Warm Sub-Neptune',
-            'Hot Rocky', 'Temperate Rocky', 'Neptune-class'
+        WITH latest_tax AS (
+            SELECT DISTINCT ON (planet_id) planet_id, cluster_label, cluster_name, run_at
+            FROM taxonomy_clusters
+            ORDER BY planet_id, run_at DESC, cluster_label DESC
         )
-        ORDER BY planet_id, run_at DESC
+        SELECT planet_id, cluster_name, run_at
+        FROM latest_tax
+        WHERE cluster_label >= 0
+          AND NOT (
+              LOWER(cluster_name) LIKE '%giant%'
+              OR LOWER(cluster_name) LIKE '%neptune%'
+              OR LOWER(cluster_name) LIKE '%rocky%'
+              OR LOWER(cluster_name) LIKE '%earth%'
+              OR LOWER(cluster_name) LIKE '%jupiter%'
+              OR LOWER(cluster_name) LIKE '%saturn%'
+              OR LOWER(cluster_name) LIKE '%water world%'
+              OR LOWER(cluster_name) LIKE '%ocean%'
+              OR LOWER(cluster_name) LIKE '%terrestrial%'
+          )
     ) tc
     JOIN planets p ON tc.planet_id = p.planet_id
     JOIN stars s ON p.star_id = s.star_id
@@ -473,7 +489,9 @@ UNION ALL
     JOIN molecule_detections md ON md.planet_id = p2.planet_id
     LEFT JOIN habitability_scores hs
         ON hs.planet_id = p2.planet_id AND hs.model_version = :score_version
-    WHERE md.detection_sigma >= 2.0 AND op.model_version = :pred_version
+    WHERE md.detection_sigma >= 2.0
+      AND COALESCE(md.hitran_match_count, 0) >= 2
+      AND op.model_version = :pred_version
 )
 ORDER BY created_at DESC
 LIMIT :limit
