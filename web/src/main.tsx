@@ -7,7 +7,13 @@ import App from './App'
 import './index.css'
 
 const qc = new QueryClient({
-  defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      retry: 3,
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
+    },
+  },
 })
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

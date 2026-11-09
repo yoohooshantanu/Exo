@@ -1,5 +1,5 @@
 """
-modules/orbital_gap_predictor.py  v3.0.0
+modules/orbital_gap_predictor.py  v3.1.0
 Key fixes from v2.0.0:
 1. DELETE replaced with upsert — predicted_at timestamps are immutable
     (this is the scientific proof of prediction priority over telescope confirmation)
@@ -130,17 +130,20 @@ def run_megno(m_star: float, planets: list, test_a: float,
         E1 = sim.energy()
         
         if not math.isfinite(megno) or megno > 4.0:
-            return False, megno, int(sim.t / test_period)
+            return False, megno, int(sim.t / test_period), "unstable"
         if abs((E1 - E0) / E0) > 1e-4:
-            return False, 999.0, int(sim.t / test_period)
+            return False, 999.0, int(sim.t / test_period), "unstable"
             
         if fast:
             # accept here — skip deep integration
             orbit = sim.particles[len(planets) + 1].orbit(primary=sim.particles[0])
+            actual_orbits = sim.t / test_period
+            if actual_orbits < 0.90 * 5_000.0:
+                return False, megno, int(actual_orbits), "insufficient_integration"
             ok = (megno <= 2.5 and not math.isnan(megno)
                 and orbit.e <= 0.15 and orbit.a > 0
                 and abs(orbit.a - test_a) / test_a <= 0.1)
-            return ok, megno, int(sim.t / test_period)
+            return ok, megno, int(actual_orbits), ("stable" if ok else "unstable")
         # Stage 3: deep integration
         # Track e_max and da/a dynamically
         step = max_t2 / 10.0
@@ -150,25 +153,33 @@ def run_megno(m_star: float, planets: list, test_a: float,
             sim.integrate(sim.t + step)
             orbit = sim.particles[len(planets) + 1].orbit(primary=sim.particles[0])
             if math.isnan(orbit.a) or math.isnan(orbit.e):
-                return False, 999.0, int(sim.t / test_period)
+                return False, 999.0, int(sim.t / test_period), "unstable"
             e_max = max(e_max, orbit.e)
             da_max = max(da_max, abs(orbit.a - test_a) / test_a)
             if e_max > 0.25 or da_max > 0.1:
-                return False, 999.0, int(sim.t / test_period)
+                return False, 999.0, int(sim.t / test_period), "unstable"
                 
         E2 = sim.energy()
         if abs((E2 - E0) / E0) > 1e-4:
-            return False, 999.0, int(sim.t / test_period)
+            return False, 999.0, int(sim.t / test_period), "unstable"
                 
         megno = sim.megno()
+        actual_orbits = sim.t / test_period
+        required_orbits = 50_000.0 if not fast else 5_000.0
+        
+        # Rigorous integration check: if simulation duration was capped early by timestep limits,
+        # do not falsely accept candidate as having demonstrated 50,000-orbit stability.
+        if actual_orbits < 0.90 * required_orbits:
+            return False, megno, int(actual_orbits), "insufficient_integration"
+
         ok = (megno <= 2.2 and not math.isnan(megno))
-        return ok, megno, int(sim.t / test_period)
+        return ok, megno, int(actual_orbits), ("stable" if ok else "unstable")
     except rebound.Collision:
-        return False, 999.0, 0
+        return False, 999.0, 0, "collision"
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return False, 999.0, 0
+        return False, 999.0, 0, "collision"
 # ── System processing ─────────────────────────────────────────────────────────
 MMR_CANDIDATES = [
     ("2:1 MMR inner", lambda a1, a2: a1 * (2.0) ** (2/3)),
@@ -243,7 +254,7 @@ def process_system(args: tuple) -> list:
             for run_idx in range(n_fast):
                 total = run_idx + 1
                 trial_seed = _trial_seed(base_seed, star_id, i, label, run_idx)
-                is_stable, _, _ = run_megno(
+                is_stable, _, _, _ = run_megno(
                     m_star, planets, test_a, test_m_solar, fast=True, seed=trial_seed
                 )
                 if is_stable:
@@ -266,7 +277,7 @@ def process_system(args: tuple) -> list:
             for run_idx in range(n_deep):
                 total_deep = run_idx + 1
                 trial_seed = _trial_seed(base_seed, star_id, i, label, run_idx + 1000)
-                is_stable, megno, n_orbits = run_megno(
+                is_stable, megno, n_orbits, status = run_megno(
                     m_star, planets, test_a, test_m_solar, fast=False, seed=trial_seed
                 )
                 if is_stable:

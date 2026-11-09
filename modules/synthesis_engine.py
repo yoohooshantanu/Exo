@@ -59,12 +59,14 @@ def query_anomalous_habitable(session):
         FROM anomaly_flags af
         JOIN planets p ON af.planet_id = p.planet_id
         JOIN stars s ON p.star_id = s.star_id
-        LEFT JOIN habitability_scores hs
+        JOIN habitability_scores hs
             ON hs.planet_id = p.planet_id
             AND hs.model_version = :score_ver
         WHERE af.deviation_sigma >= 3.0
-        ORDER BY hs.composite_score DESC NULLS LAST, af.deviation_sigma DESC
-    """), {"score_ver": SCORE_VERSION}).fetchall()
+          AND hs.composite_score IS NOT NULL
+          AND hs.composite_score >= :min_habitability
+        ORDER BY hs.composite_score DESC, af.deviation_sigma DESC
+    """), {"score_ver": SCORE_VERSION, "min_habitability": 0.60}).fetchall()
 
     cols = ["planet_name", "planet_id", "hostname", "anomaly_type", "deviation_sigma",
             "observed_value", "expected_value", "unit", "model_reference",
@@ -93,17 +95,19 @@ def query_novel_taxonomy(session):
             LEFT JOIN habitability_scores hs
                 ON hs.planet_id = p.planet_id
                 AND hs.model_version = :score_ver
-            WHERE tc.cluster_label = -1
-               OR tc.cluster_name NOT IN (
-                  'Hot Giant', 'Warm Giant', 'Cold Giant',
-                  'Hot Sub-Neptune', 'Warm Sub-Neptune',
-                  'Hot Rocky', 'Temperate Rocky',
-                  'Neptune-class'
-               )
+            -- Scientifically accurate: Exclude cluster_label = -1 (HDBSCAN unassigned statistical noise)
+            -- Only reproducible clusters (cluster_label >= 0) outside known canonical archetypes qualify as candidate novel
+            WHERE tc.cluster_label >= 0
+              AND tc.cluster_name NOT IN (
+                  'Hot Giant', 'Warm Giant', 'Cold Giant', 'Gas Giant',
+                  'Hot Sub-Neptune', 'Warm Sub-Neptune', 'Cold Sub-Neptune', 'Sub-Neptune',
+                  'Hot Rocky', 'Temperate Rocky', 'Cold Rocky', 'Warm Rocky', 'Rocky',
+                  'Neptune-class', 'Super-Earth'
+              )
             ORDER BY p.planet_id, tc.run_at DESC
         ) sub
         ORDER BY composite_score DESC NULLS LAST
-    """), {"score_ver": SCORE_VERSION}).fetchall()
+    """), {"score_ver": SCORE_VERSION, "min_habitability": 0.60}).fetchall()
 
     cols = ["planet_name", "planet_id", "hostname", "cluster_label",
             "cluster_name", "distance_to_centroid", "composite_score"]

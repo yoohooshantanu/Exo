@@ -119,14 +119,14 @@ class TestAbioticReasoning:
         assert "abiotic" in result["method_notes"].lower()
 
     def test_triple_biosignature(self):
-        """H2O + CH4 + O3 all confirmed → abiotic_ruled_out = True."""
+        """H2O + CH4 + O3 all confirmed → candidate photochemical disequilibrium flagged without claiming abiotic ruled out."""
         h2o = make_det(molecule="h2o", sigma=4.0)
         ch4 = make_det(molecule="ch4", sigma=4.0)
         o3 = make_det(molecule="o3", sigma=4.0)
         all_dets = [h2o, ch4, o3]
         result = classify_detection(h2o, all_dets, {}, None)
-        assert result["abiotic_ruled_out"] is True
-        assert "TRIPLE" in result["method_notes"]
+        assert result["abiotic_ruled_out"] is None  # Cannot rule out abiotic origins without stellar UV & volcanic modeling
+        assert "disequilibrium" in result["method_notes"].lower()
 
     def test_so2_on_rocky_flagged_volcanic(self):
         """SO2 on a rocky world should be flagged as volcanic."""

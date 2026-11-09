@@ -28,7 +28,14 @@ export const api = {
 
   planet: (name: string) => fetchJson<import('@/types').PlanetProfileVector>(`/api/planets/${encodeURIComponent(name)}`),
 
-  spectrum: (name: string) => fetchJson<import('@/types').SpectrumView>(`/api/planets/${encodeURIComponent(name)}/spectrum`),
+  spectrum: async (name: string) => {
+    try {
+      return await fetchJson<import('@/types').SpectrumView>(`/api/planets/${encodeURIComponent(name)}/spectrum`)
+    } catch (err: any) {
+      // Return null when planet lacks synthetic/observed spectra so UI shows fallback without throwing uncaught 404
+      return null
+    }
+  },
 
   stars: (params: { page?: number; page_size?: number }) =>
     fetchJson<import('@/types').PaginatedResponse<import('@/types').StarItem>>('/api/stars', params),

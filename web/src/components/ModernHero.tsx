@@ -19,7 +19,7 @@ const featuredPlanets = [
     triage: 77.2, 
     obs: 78.7, 
     char: 100.0,
-    note: 'Terrestrial surface confirmed (P_rocky = 0.95). High-priority candidate for JWST Cycles 4–5 transmission spectroscopy.'
+    note: 'Terrestrial-planet candidate in conservative HZ (P_rocky = 0.95 model gate). Forward-modelled atmospheric benchmark for transmission spectroscopy; atmospheric composition unconfirmed observationally.'
   },
   { 
     name: 'LHS 1140 b', 
@@ -82,7 +82,7 @@ export function ModernHero({ totalPlanets }: ModernHeroProps) {
         <div className="lg:col-span-7 space-y-4">
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/80 px-2.5 py-1 text-xs font-mono text-zinc-300"><span className="size-1.5 rounded-full bg-sky-400" /><span>Observatory Target Prioritization Engine</span></div>
-            <div className="inline-flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900/80 px-2.5 py-1 text-xs font-mono text-zinc-300"><span className="size-1.5 rounded-full bg-emerald-400" /><span>JWST Allocation Validated</span></div>
+            <div className="inline-flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900/80 px-2.5 py-1 text-xs font-mono text-zinc-300"><span className="size-1.5 rounded-full bg-emerald-400" /><span>JWST Proposal Screening Benchmark</span></div>
           </div>
 
           <h1 className="text-3xl sm:text-4xl lg:text-5xl font-medium tracking-tight text-white leading-tight">

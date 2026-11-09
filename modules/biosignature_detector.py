@@ -1,10 +1,10 @@
 """
-modules/biosignature_detector.py  v2.0.0
+modules/biosignature_detector.py  v3.0.0
 
 Core science engine for Phase 4. Compares atmospheric spectra against
 HITRAN molecular features to identify biosignature candidates.
 
-v2.0.0 upgrades:
+v3.0.0 upgrades:
   1. Polynomial continuum fitting (Legendre degree-3)
   2. Bayesian evidence scoring (BIC-based Bayes factor)
   3. Multi-epoch consistency checks
@@ -382,9 +382,10 @@ def unmix_spectrum(spectrum_df, templates_dict, phys_params):
                 (template_vals[1:-1] > t_max * 0.15) &
                 (y[1:-1] > 0)
             )
-            feature_peak_count = max(1, int(np.sum(is_peak)))
+            # Scientifically accurate: zero peaks detected means 0, never forced to 1
+            feature_peak_count = int(np.sum(is_peak))
         else:
-            feature_peak_count = int(np.sum((template_vals > t_max * 0.1) & (y > 0)))
+            feature_peak_count = 0
 
         if sigma >= marginal_sigma:
             max_idx = np.argmax(template_vals)
@@ -460,8 +461,8 @@ def classify_detection(det, all_detections_for_planet, phys_params, host_spectra
     # Triple biosignature check
     if TRIPLE_BIOSIG.issubset(set(d for d, s in detected_mols.items() if s >= CONFIRMED_SIGMA)):
         if mol in TRIPLE_BIOSIG:
-            abiotic = True
-            notes += "TRIPLE BIOSIGNATURE (H₂O+CH₄+O₃) — abiotic origin unlikely. "
+            abiotic = None  # Candidate photochemical disequilibrium pattern; requires stellar UV & volcanic modeling before ruling out abiotic origins
+            notes += "Candidate photochemical disequilibrium pattern (H2O+CH4+O3); requires stellar UV and volcanic false-positive modeling before ruling out abiotic sources. "
             
     # CO / CO2 ratio
     if mol == "co" and detected_mols.get("co2", 0) >= marginal_sigma:

@@ -220,7 +220,7 @@ async def list_planets(
 
 
 @app.get("/api/export/planets")
-@limiter.limit("5/minute")
+@limiter.limit("60/minute")
 async def export_planets(
     request: Request,
     method: Optional[str] = None,
@@ -266,7 +266,7 @@ async def export_planets(
 
 
 @app.get("/api/planets/{planet_name}", response_model=PlanetProfileVector)
-@limiter.limit("20/minute")
+@limiter.limit("120/minute")
 async def get_planet(request: Request, planet_name: str, session: AsyncSession = Depends(get_db)):
     # Main detail
     row = (await session.execute(
@@ -459,7 +459,7 @@ async def get_planet(request: Request, planet_name: str, session: AsyncSession =
 # ── Spectrum ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/planets/{planet_name}/spectrum", response_model=SpectrumView)
-@limiter.limit("20/minute")
+@limiter.limit("120/minute")
 async def get_spectrum(request: Request, planet_name: str, session: AsyncSession = Depends(get_db)):
     specs = (await session.execute(
         q.SPECTRA_FOR_PLANET, {"planet_name": planet_name}
@@ -524,7 +524,7 @@ async def list_stars(
 # ── Star Positions (3D Map) ──────────────────────────────────────────────────
 
 @app.get("/api/stars/positions", response_model=StarPositionsResponse)
-@limiter.limit("20/minute")
+@limiter.limit("120/minute")
 async def get_star_positions(
     request: Request,
     limit: int = Query(6224, ge=1, le=10000),
@@ -620,7 +620,8 @@ async def get_priority_target(session: AsyncSession = Depends(get_db)):
     if d.get("eq_temperature_k"):
         parts.append(f"T_eq {d['eq_temperature_k']:.0f} K")
     if d.get("molecules_detected"):
-        parts.append(f"atmospheric {d['molecules_detected'].upper()} detected")
+        # Accurately describe as candidate molecular spectral features rather than confirmed atmospheric detections
+        parts.append(f"candidate {d['molecules_detected'].upper()} spectral features (forward model benchmark)")
     if d.get("anomaly_count", 0) > 0:
         parts.append(f"{d['anomaly_count']} anomaly flag(s)")
 

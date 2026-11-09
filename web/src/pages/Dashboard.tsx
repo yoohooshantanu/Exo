@@ -52,7 +52,7 @@ const PROPOSAL_TARGETS = [
     obs_index: 78.7,
     triage_index: 77.2,
     char_index: 100.0,
-    science_case: 'Terrestrial archetype in conservative HZ. Prime target for Cycles 4–5 follow-up (forward model simulated atmosphere benchmark).',
+    science_case: 'Terrestrial-planet candidate in conservative HZ (P_rocky = 0.95 model gate). Forward-modelled benchmark for Cycles 4–5 transmission spectroscopy; atmospheric composition remains unconfirmed observationally.',
     urgency: 'HIGH PRIORITY'
   },
   {
@@ -325,10 +325,10 @@ export default function Dashboard() {
                     <TableCell className="w-[110px] whitespace-nowrap text-right text-zinc-200 font-mono font-medium">
                       {p.triage_index.toFixed(1)}
                     </TableCell>
-                    <TableCell className="min-w-[320px] text-zinc-400 font-sans text-xs leading-relaxed pr-4">
+                    <TableCell className="min-w-[320px] max-w-[480px] whitespace-normal break-words text-zinc-400 font-sans text-xs leading-relaxed pr-6">
                       {p.science_case}
                     </TableCell>
-                    <TableCell className="w-[140px] whitespace-nowrap text-center shrink-0">
+                    <TableCell className="w-[150px] min-w-[150px] whitespace-nowrap text-center shrink-0">
                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] border border-zinc-800 bg-zinc-900/60 text-[10px] font-mono text-zinc-300">
                         <span className={`size-1.5 rounded-full ${
                           p.urgency === 'HIGH PRIORITY' 

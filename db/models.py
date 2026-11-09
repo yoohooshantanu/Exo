@@ -237,6 +237,9 @@ class OrbitalPrediction(Base):
     star = relationship("Star", back_populates="orbital_predictions")
 
 
+# NOTE [DEPRECATED SCHEMA MODEL]:
+# BiosignatureDetection (`biosignature_detections`) is a legacy schema table preserved for backwards compatibility.
+# The active, canonical model used across pipeline modules and API views is `MoleculeDetection` (`molecule_detections`).
 class BiosignatureDetection(Base):
     __tablename__ = "biosignature_detections"
 
