@@ -52,7 +52,7 @@ const PROPOSAL_TARGETS = [
     obs_index: 78.7,
     triage_index: 77.2,
     char_index: 100.0,
-    science_case: 'Terrestrial archetype in conservative HZ. Atmospheric CH4, CO, CO2, H2O detected. High transmission SNR.',
+    science_case: 'Terrestrial archetype in conservative HZ. Prime target for Cycles 4–5 follow-up (forward model simulated atmosphere benchmark).',
     urgency: 'HIGH PRIORITY'
   },
   {

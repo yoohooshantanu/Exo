@@ -79,10 +79,12 @@ def run_megno(m_star: float, planets: list, test_a: float,
     sim.units    = ('yr', 'AU', 'Msun')
     sim.integrator = "whfast"
     min_a = min([p['a'] for p in planets] + [test_a])
-    # orbital period of innermost body (years)
-    min_period = min_a ** 1.5
+    # Orbital period from Kepler's Third Law: P = sqrt(a^3 / M_star) in AU, M_sun, years
+    m_star_safe = max(0.01, float(m_star))
+    min_period = math.sqrt((min_a ** 3) / m_star_safe)
+    test_period = math.sqrt((test_a ** 3) / m_star_safe)
     # Adaptive timestep
-    period_ratio = (test_a**1.5) / min_period
+    period_ratio = test_period / min_period
     if period_ratio < 1.5:
         sim.dt = min_period / 200.0
     elif period_ratio < 3.0:
@@ -115,7 +117,8 @@ def run_megno(m_star: float, planets: list, test_a: float,
             
     sim.move_to_com()
     sim.init_megno()
-    test_period = test_a ** 1.5
+    # Consistent Keplerian period with stellar mass: P = sqrt(a^3 / M_star)
+    test_period = math.sqrt((test_a ** 3) / m_star_safe)
     max_t1 = min(5_000  * test_period, sim.dt * 2_000_000)
     max_t2 = min(50_000 * test_period, sim.dt * 4_000_000)
     

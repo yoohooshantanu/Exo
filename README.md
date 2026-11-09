@@ -6,7 +6,7 @@ I built this to do all of that in one place. The platform pulls the full NASA ar
 
 ```mermaid
 flowchart LR
-    A["NASA Archive\n6,224 planets"] --> B["Habitability\nScorer"]
+    A["NASA Archive\n6,467 planets"] --> B["Habitability\nScorer"]
     A --> C["Orbital Gap\nPredictor"]
     A --> D["Biosignature\nDetector"]
     A --> E["Anomaly\nDetector"]
@@ -137,7 +137,7 @@ $$P_{\text{rocky}}(R_p, M_p) = \frac{1}{1 + \exp\left(\frac{R_p - 1.80\,R_\oplus
 
 $$\mathbf{\text{Composite Habitability}} = \Big(0.70 \cdot \text{ESI} + 0.30 \cdot \text{Safety}\Big) \times P_{\text{rocky}}(R_p, M_p)$$
 
-- **Uncertainty Propagation**: Every score includes a 100-trial Monte Carlo IQR ($\pm \text{IQR} = Q_{75} - Q_{25}$) sampled over measured radius and mass parameter error distributions.
+- **Uncertainty Propagation**: Every score includes a 30-trial Monte Carlo IQR ($\pm \text{IQR} = Q_{75} - Q_{25}$) sampled over measured radius and mass parameter error distributions.
 - **Provenance & Imputation**: Planets lacking measured masses fall back to empirical mass-radius relations ($M \sim R^{3.5}$ for rocky / $M \sim R^{2.06}$ for gaseous) and are explicitly flagged with a `Mass Imputed` badge.
 
 <br>

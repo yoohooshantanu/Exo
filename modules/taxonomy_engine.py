@@ -201,13 +201,22 @@ def run_clustering(df, min_cluster_size=30, min_samples=10):
     labels[clusterable_mask.values] = clusterable_labels
     labels[~clusterable_mask] = -1
 
-    X_full = np.zeros((len(imputed), len(FEATURES)))
-    for i, feat in enumerate(FEATURES):
-        vals = imputed[feat].copy()
-        if feat in LOG_FEATURES:
-            pos = vals > 0
-            vals.loc[pos] = np.log10(vals.loc[pos])
-        X_full[:, i] = scaler.transform(vals.values.reshape(-1, 1)).ravel()
+    # Build complete 5-feature matrix with identical log-transform and imputation handling
+    imputed_clean = imputed.copy()
+    for feat in LOG_FEATURES:
+        pos_mask = imputed_clean[feat] > 0
+        imputed_clean.loc[pos_mask, feat] = np.log10(imputed_clean.loc[pos_mask, feat])
+        pos_median = imputed_clean.loc[pos_mask, feat].median() if pos_mask.any() else 0.0
+        imputed_clean.loc[~pos_mask, feat] = pos_median
+
+    X_full_raw = imputed_clean[FEATURES].to_numpy(dtype=float)
+    # Transform full 5-column matrix through the 5-feature scaler (preventing 1-feature shape mismatch)
+    X_full = scaler.transform(X_full_raw)
+    nan_full = np.isnan(X_full)
+    if nan_full.any():
+        col_medians = np.nanmedian(X_scaled, axis=0)
+        for j in range(X_full.shape[1]):
+            X_full[nan_full[:, j], j] = col_medians[j]
 
     n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
     n_noise = (labels == -1).sum()

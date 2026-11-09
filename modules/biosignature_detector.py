@@ -373,18 +373,30 @@ def unmix_spectrum(spectrum_df, templates_dict, phys_params):
             sigma = 0
 
         template_vals = X[:, i] * y_error
-        active_points = np.sum((template_vals > np.max(template_vals)*0.1) & (y > 0))
-        
+        # Identify discrete local absorption template peaks rather than arbitrary grid bins
+        t_max = np.max(template_vals) if len(template_vals) > 0 else 0
+        if t_max > 0 and len(template_vals) > 4:
+            is_peak = (
+                (template_vals[1:-1] > template_vals[:-2]) & 
+                (template_vals[1:-1] > template_vals[2:]) & 
+                (template_vals[1:-1] > t_max * 0.15) &
+                (y[1:-1] > 0)
+            )
+            feature_peak_count = max(1, int(np.sum(is_peak)))
+        else:
+            feature_peak_count = int(np.sum((template_vals > t_max * 0.1) & (y > 0)))
+
         if sigma >= marginal_sigma:
             max_idx = np.argmax(template_vals)
             peak_wl = obs_wl[valid_mask][max_idx]
-            mean_excess = np.mean(excess_ppm_arr[valid_mask][template_vals > np.max(template_vals)*0.1]) if active_points > 0 else 0
+            sig_mask = template_vals > t_max * 0.1
+            mean_excess = np.mean(excess_ppm_arr[valid_mask][sig_mask]) if np.any(sig_mask) else 0
 
             detections.append({
                 "molecule": mol,
                 "detection_sigma": round(sigma, 3),
                 "wavelength_um": round(peak_wl, 4),
-                "hitran_match_count": int(active_points),
+                "hitran_match_count": int(feature_peak_count),
                 "depth_excess_ppm": round(float(mean_excess), 3),
                 "log_evidence": log_evidence,
                 "is_muted": is_muted,
@@ -909,7 +921,7 @@ def run(planet_name=None, threshold=None, dry_run=False, validate=False):
 
                 print(f"  {tier_label} {MOL_NAMES[det['molecule']]}  "
                       f"sigma={det['detection_sigma']:.1f}  "
-                      f"lines={det['hitran_match_count']}  "
+                      f"peaks={det['hitran_match_count']}  "
                       f"excess={det['depth_excess_ppm']:.1f} ppm")
 
             all_detections.extend(planet_dets)

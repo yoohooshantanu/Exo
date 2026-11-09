@@ -19,7 +19,7 @@ const featuredPlanets = [
     triage: 77.2, 
     obs: 78.7, 
     char: 100.0,
-    note: 'Terrestrial surface confirmed (P_rocky = 0.95). Atmospheric CH4, CO, CO2, H2O, NH3 detected.'
+    note: 'Terrestrial surface confirmed (P_rocky = 0.95). High-priority candidate for JWST Cycles 4–5 transmission spectroscopy.'
   },
   { 
     name: 'LHS 1140 b', 
