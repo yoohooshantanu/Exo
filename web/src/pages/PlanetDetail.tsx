@@ -65,15 +65,15 @@ export default function PlanetDetail() {
 
   const radarData = useMemo(() => {
     if (!planet) return []
-    const round3 = (v?: number | null) => (v != null && v > 0 ? Number(v.toFixed(3)) : 0)
+    const toPercent = (v?: number | null) => (v != null && v > 0 ? Number((v * 100).toFixed(1)) : 0)
     return [
-      { axis: 'Radius', value: round3(planet.habitability.radius_esi_score) },
-      { axis: 'Mass', value: round3(planet.habitability.mass_esi_score) },
-      { axis: 'Temp', value: round3(planet.habitability.teq_score) },
-      { axis: 'HZ', value: round3(planet.habitability.hz_score) },
-      { axis: 'Tidal', value: round3(planet.anomaly_risk.tidal_lock_score) },
-      { axis: 'XUV Escape', value: round3(planet.anomaly_risk.xuv_escape_score) },
-      { axis: 'Ecc', value: round3(planet.habitability.eccentricity_score) },
+      { axis: 'Radius', value: toPercent(planet.habitability.radius_esi_score) },
+      { axis: 'Mass', value: toPercent(planet.habitability.mass_esi_score) },
+      { axis: 'Temp', value: toPercent(planet.habitability.teq_score) },
+      { axis: 'HZ', value: toPercent(planet.habitability.hz_score) },
+      { axis: 'Tidal', value: toPercent(planet.anomaly_risk.tidal_lock_score) },
+      { axis: 'Escape', value: toPercent(planet.anomaly_risk.xuv_escape_score) },
+      { axis: 'Ecc', value: toPercent(planet.habitability.eccentricity_score) },
     ].filter(d => d.value > 0)
   }, [planet])
 
@@ -310,14 +310,20 @@ export default function PlanetDetail() {
                   <PolarGrid stroke="hsl(var(--muted-foreground)/0.2)" />
                   <PolarAngleAxis dataKey="axis" tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
                   <PolarRadiusAxis 
-                    type="number" 
-                    domain={[0, 1]} 
+                    domain={[0, 100]} 
                     angle={90} 
                     tickCount={6} 
+                    tickFormatter={(v) => (Number(v) / 100).toFixed(1)}
                     tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground)/0.7)' }} 
                     stroke="hsl(var(--muted-foreground)/0.2)" 
                   />
-                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <ChartTooltip 
+                    content={
+                      <ChartTooltipContent 
+                        formatter={(value) => `${(Number(value) / 100).toFixed(3)} (${value}%)`} 
+                      />
+                    } 
+                  />
                   <Radar dataKey="value" fill="var(--chart-1)" fillOpacity={0.25} stroke="var(--chart-1)" strokeWidth={1.5} dot={{ r: 2.5, fill: 'var(--chart-1)' }} />
                 </RadarChart>
               </ChartContainer>

@@ -245,18 +245,29 @@ export default function Validation() {
       </div>
 
       {/* ── Main Tabbed Content ─────────────────────────────────────── */}
-      <Tabs defaultValue="jwst" className="w-full space-y-6">
-        <TabsList className="bg-zinc-900/60 border border-zinc-800/80 p-1 rounded-lg">
-          <TabsTrigger value="jwst" className="text-xs font-mono data-[state=active]:bg-zinc-800 data-[state=active]:text-white">
-            1. JWST Allocation Empirical Study
-          </TabsTrigger>
-          <TabsTrigger value="upr" className="text-xs font-mono data-[state=active]:bg-zinc-800 data-[state=active]:text-white">
-            2. UPR ESI &amp; Solar System Benchmarks
-          </TabsTrigger>
-          <TabsTrigger value="diagnostics" className="text-xs font-mono data-[state=active]:bg-zinc-800 data-[state=active]:text-white">
-            3. Pipeline Diagnostics &amp; Engine Health
-          </TabsTrigger>
-        </TabsList>
+      <Tabs defaultValue="jwst" className="w-full flex flex-col space-y-6">
+        <div className="w-full">
+          <TabsList className="w-full sm:w-auto inline-flex flex-row flex-wrap items-center gap-1.5 bg-zinc-900/60 border border-zinc-800/80 p-1.5 rounded-xl">
+            <TabsTrigger 
+              value="jwst" 
+              className="text-xs font-mono px-4 py-2 rounded-lg text-zinc-400 hover:text-white data-[state=active]:bg-zinc-800 data-[state=active]:text-white transition-all"
+            >
+              1. JWST Allocation Empirical Study
+            </TabsTrigger>
+            <TabsTrigger 
+              value="upr" 
+              className="text-xs font-mono px-4 py-2 rounded-lg text-zinc-400 hover:text-white data-[state=active]:bg-zinc-800 data-[state=active]:text-white transition-all"
+            >
+              2. UPR ESI &amp; Solar System Benchmarks
+            </TabsTrigger>
+            <TabsTrigger 
+              value="diagnostics" 
+              className="text-xs font-mono px-4 py-2 rounded-lg text-zinc-400 hover:text-white data-[state=active]:bg-zinc-800 data-[state=active]:text-white transition-all"
+            >
+              3. Pipeline Diagnostics &amp; Engine Health
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         {/* ── TAB 1: JWST ALLOCATION STUDY ─────────────────────────── */}
         <TabsContent value="jwst" className="space-y-6">

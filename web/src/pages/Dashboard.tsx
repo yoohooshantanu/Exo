@@ -284,46 +284,46 @@ export default function Dashboard() {
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-            <Table>
+            <Table className="min-w-[1050px]">
               <TableHeader className="bg-zinc-900/60">
                 <TableRow className="border-zinc-800 hover:bg-transparent">
-                  <TableHead className="text-xs font-mono text-zinc-400">Target Candidate</TableHead>
-                  <TableHead className="text-xs font-mono text-zinc-400">Distance &bull; Radius &bull; Teq</TableHead>
-                  <TableHead className="text-xs font-mono text-zinc-400 text-center">P_rocky Gate</TableHead>
-                  <TableHead className="text-xs font-mono text-zinc-400 text-right">Observability</TableHead>
-                  <TableHead className="text-xs font-mono text-zinc-400 text-right">Physical Triage</TableHead>
-                  <TableHead className="text-xs font-mono text-zinc-400">Scientific Proposal Justification</TableHead>
-                  <TableHead className="text-xs font-mono text-zinc-400 text-center">Status</TableHead>
+                  <TableHead className="w-[160px] whitespace-nowrap text-xs font-mono text-zinc-400">Target Candidate</TableHead>
+                  <TableHead className="w-[180px] whitespace-nowrap text-xs font-mono text-zinc-400">Distance &bull; Radius &bull; Teq</TableHead>
+                  <TableHead className="w-[100px] whitespace-nowrap text-xs font-mono text-zinc-400 text-center">P_rocky Gate</TableHead>
+                  <TableHead className="w-[110px] whitespace-nowrap text-xs font-mono text-zinc-400 text-right">Observability</TableHead>
+                  <TableHead className="w-[110px] whitespace-nowrap text-xs font-mono text-zinc-400 text-right">Physical Triage</TableHead>
+                  <TableHead className="min-w-[320px] text-xs font-mono text-zinc-400">Scientific Proposal Justification</TableHead>
+                  <TableHead className="w-[140px] whitespace-nowrap text-xs font-mono text-zinc-400 text-center">Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody className="font-mono text-xs">
                 {PROPOSAL_TARGETS.map((p) => (
                   <TableRow key={p.name} className="border-zinc-800/60 hover:bg-zinc-900/40 transition-colors">
-                    <TableCell className="font-medium text-white">
+                    <TableCell className="w-[160px] whitespace-nowrap font-medium text-white">
                       <Link to={`/planets/${encodeURIComponent(p.name)}`} className="hover:underline flex items-center gap-1.5">
                         <span>{p.name}</span>
                         <ArrowUpRight className="size-3 text-zinc-400" />
                       </Link>
                       <span className="text-[10px] text-zinc-400 block">{p.hostname}</span>
                     </TableCell>
-                    <TableCell className="text-zinc-300">
+                    <TableCell className="w-[180px] whitespace-nowrap text-zinc-300">
                       <span>{p.dist}</span> &bull; <span>{p.radius}</span> &bull; <span>{p.teq}</span>
                     </TableCell>
-                    <TableCell className="text-center">
+                    <TableCell className="w-[100px] whitespace-nowrap text-center">
                       <Badge variant="outline" className="border-zinc-800 text-zinc-300 text-[10px]">
                         {p.p_rocky}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-right text-cyan-400 font-semibold">
+                    <TableCell className="w-[110px] whitespace-nowrap text-right text-cyan-400 font-semibold">
                       {p.obs_index.toFixed(1)}
                     </TableCell>
-                    <TableCell className="text-right text-emerald-400 font-semibold">
+                    <TableCell className="w-[110px] whitespace-nowrap text-right text-emerald-400 font-semibold">
                       {p.triage_index.toFixed(1)}
                     </TableCell>
-                    <TableCell className="text-zinc-400 font-sans text-xs max-w-xs">
+                    <TableCell className="min-w-[320px] text-zinc-400 font-sans text-xs leading-relaxed pr-4">
                       {p.science_case}
                     </TableCell>
-                    <TableCell className="text-center">
+                    <TableCell className="w-[140px] whitespace-nowrap text-center shrink-0">
                       <Badge 
                         variant="outline" 
                         className={`text-[10px] ${p.urgency === 'HIGH PRIORITY' ? 'border-emerald-500/40 text-emerald-400 bg-emerald-950/20' : p.urgency === 'ELT TARGET' ? 'border-purple-500/40 text-purple-400 bg-purple-950/20' : 'border-cyan-500/40 text-cyan-400 bg-cyan-950/20'}`}

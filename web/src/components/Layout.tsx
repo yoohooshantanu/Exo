@@ -26,9 +26,6 @@ export default function Layout() {
             </div>
             <div className="flex items-baseline gap-2">
               <span className="font-medium text-sm text-zinc-100 tracking-tight">ExoDiscovery</span>
-              <span className="hidden sm:inline-block font-mono text-[10px] text-zinc-500 uppercase tracking-widest border border-zinc-800 px-1.5 py-0.5 rounded">
-                v5.0
-              </span>
             </div>
           </Link>
 
