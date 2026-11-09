@@ -2,7 +2,7 @@
 modules/biosignature_detector.py  v3.0.0
 
 Core science engine for Phase 4. Compares atmospheric spectra against
-HITRAN molecular features to identify biosignature candidates.
+molecular cross-section templates to identify statistically significant biosignature screening candidates.
 
 v3.0.0 upgrades:
   1. Polynomial continuum fitting (Legendre degree-3)
@@ -612,7 +612,7 @@ def generate_report(enriched, all_detections, marginal_sigma=MARGINAL_SIGMA):
     marginal = [d for d in all_detections if d.get("tier") == "marginal"]
 
     md = f"""# Biosignature Detection Report
-**Date:** {date_str}  |  **Model:** v{MODEL_VERSION}  |  **Threshold:** {CONFIRMED_SIGMA}σ confirmed / {marginal_sigma}σ marginal
+**Date:** {date_str}  |  **Model:** v{MODEL_VERSION}  |  **Threshold:** ≥{CONFIRMED_SIGMA}σ screening candidate / {marginal_sigma}σ marginal
 
 ## Summary
 - **Planets analyzed:** {len(enriched)}
@@ -621,7 +621,7 @@ def generate_report(enriched, all_detections, marginal_sigma=MARGINAL_SIGMA):
 
 ## Tier 1 — Spectral Excess Flagged for Retrieval (≥{CONFIRMED_SIGMA}σ)
 
-| Planet | Molecule | σ | ln B | Excess (ppm) | Lines | λ (µm) | Facility | Hab. Score |
+| Planet | Molecule | σ | ln B | Excess (ppm) | Template Peaks | λ (µm) | Facility | Hab. Score |
 |:-------|:---------|--:|:-----|:-------------|:------|:-------|:---------|:-----------|
 """
     for entry in sorted(enriched, key=lambda x: x.get("hab_score") or 0, reverse=True):
@@ -638,7 +638,7 @@ def generate_report(enriched, all_detections, marginal_sigma=MARGINAL_SIGMA):
     md += f"""
 ## Tier 2 — Marginal Detections ({marginal_sigma}–{CONFIRMED_SIGMA}σ) — Watchlist
 
-| Planet | Molecule | σ | ln B | Excess (ppm) | Lines | Notes |
+| Planet | Molecule | σ | ln B | Excess (ppm) | Template Peaks | Notes |
 |:-------|:---------|--:|:-----|:-------------|:------|:------|
 """
     for entry in enriched:
@@ -653,7 +653,7 @@ def generate_report(enriched, all_detections, marginal_sigma=MARGINAL_SIGMA):
     md += f"""
 ## Methodology & Limitations
 1. **Spectra Source:** NASA Exoplanet Archive Atmospheric Spectroscopy Table (TAP).
-2. **First-Pass Heuristic Matching:** The HITRAN molecular line matching (≥{MIN_HITRAN_MATCH} lines required per detection) is a *first-pass heuristic matching algorithm*.
+2. **First-Pass Heuristic Matching:** The molecular template feature matching (≥{MIN_TEMPLATE_FEATURE_PEAKS} local feature peaks required per candidate) is a *first-pass screening algorithm* against cross-section templates, not an independently resolved line-by-line identification.
 3. **Continuum Estimation:** Legendre polynomial (degree {POLY_DEGREE}) masking known band centers, replacing the legacy median binning.
 4. **Significance & Evidence:** Detection σ = (depth_obs − continuum) / uncertainty (Note: This is a first-pass spectral excess heuristic, not a retrieval-grade Bayesian significance). Bayesian Evidence (ln B) approximated via BIC (M1 vs M0).
 5. **Validation:** Cross-referenced against stellar spectra (M/K dwarfs) to penalize possible starspot contamination. Multi-epoch consistency applies confidence decay.

@@ -19,10 +19,10 @@ const qc = new QueryClient({
         if (error?.status && [400, 401, 403, 404].includes(error.status)) {
           return false
         }
-        // Allow up to 7 retries for Render cold start (>50s total window)
-        return failureCount < 7
+        // Allow up to 8 retries for Render cold start (>56s total backoff + timeouts)
+        return failureCount < 8
       },
-      retryDelay: (attempt) => Math.min(1500 * (1.6 ** attempt), 10000),
+      retryDelay: (attempt) => Math.min(2000 * (1.5 ** attempt), 10000),
     },
   },
 })

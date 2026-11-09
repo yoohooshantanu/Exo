@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 """FastAPI gateway for the Exoplanet Discovery Platform."""
 import asyncio
 import json
@@ -149,16 +150,28 @@ async def get_stats(request: Request, session: AsyncSession = Depends(get_db)):
 @app.get("/api/taxonomy-stats")
 async def get_taxonomy_stats(session: AsyncSession = Depends(get_db)):
     rows = (await session.execute(text("""
+        WITH latest_taxonomy AS (
+            SELECT DISTINCT ON (tc.planet_id)
+                tc.planet_id,
+                tc.cluster_label,
+                tc.cluster_name
+            FROM taxonomy_clusters tc
+            ORDER BY tc.planet_id, tc.run_at DESC, tc.cluster_label DESC
+        )
         SELECT 
             CASE 
-                WHEN tc.cluster_label = -1 THEN 'Noise/Novel'
-                ELSE COALESCE(tc.cluster_name, 'Unknown')
+                WHEN lt.cluster_label = -1 THEN 'Unassigned (HDBSCAN Noise)'
+                ELSE COALESCE(lt.cluster_name, 'Unknown')
             END AS cluster_label, 
-            COUNT(*) AS count
-        FROM taxonomy_clusters tc
-        JOIN planets p ON tc.planet_id = p.planet_id
+            COUNT(*)::int AS count
+        FROM latest_taxonomy lt
+        JOIN planets p ON lt.planet_id = p.planet_id
         WHERE p.status = 'confirmed'
-        GROUP BY tc.cluster_label, tc.cluster_name
+        GROUP BY 
+            CASE 
+                WHEN lt.cluster_label = -1 THEN 'Unassigned (HDBSCAN Noise)'
+                ELSE COALESCE(lt.cluster_name, 'Unknown')
+            END
         ORDER BY count DESC
     """))).mappings().all()
     return [dict(r) for r in rows]
@@ -788,8 +801,8 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
     mol_rows = (await session.execute(text("""
         SELECT molecule, COUNT(*)::int as total,
                ROUND(AVG(detection_sigma)::numeric, 2) as avg_sigma,
-               SUM(CASE WHEN detection_sigma >= 3 THEN 1 ELSE 0 END)::int as confirmed,
-               SUM(CASE WHEN detection_sigma >= 2 AND detection_sigma < 3 THEN 1 ELSE 0 END)::int as marginal
+               SUM(CASE WHEN detection_sigma >= 3.0 AND COALESCE(hitran_match_count, 0) >= 3 THEN 1 ELSE 0 END)::int as confirmed,
+               SUM(CASE WHEN detection_sigma >= 2.0 AND detection_sigma < 3.0 AND COALESCE(hitran_match_count, 0) >= 2 THEN 1 ELSE 0 END)::int as marginal
         FROM molecule_detections GROUP BY molecule ORDER BY total DESC
     """))).fetchall()
 
@@ -838,6 +851,7 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
                SUM(CASE WHEN composite_score >= 0.4 AND composite_score < 0.7 THEN 1 ELSE 0 END)::int,
                SUM(CASE WHEN composite_score < 0.4 THEN 1 ELSE 0 END)::int
         FROM habitability_scores
+        WHERE model_version = :score_ver
     """))).fetchone()
 
     hab_histogram = (await session.execute(text("""

@@ -154,6 +154,7 @@ def query_gap_biosignature(session):
             ON hs.planet_id = p2.planet_id
             AND hs.model_version = :score_ver
         WHERE md.detection_sigma >= 2.0
+          AND COALESCE(md.hitran_match_count, 0) >= 2
           AND op.model_version = :pred_ver
         ORDER BY md.detection_sigma DESC, op.stability_confidence DESC
     """), {"score_ver": SCORE_VERSION, "pred_ver": PRED_VERSION}).fetchall()
@@ -239,8 +240,7 @@ Planets with physical anomalies (>3 sigma) that also have habitability scores.
 ---
 
 ## Alert Type 2: Novel Taxonomy (No Known Analog)
-Planets in HDBSCAN clusters that don't map to standard NASA classifications,
-or classified as noise (truly unique planets).
+Planets in reproducible HDBSCAN clusters (cluster_label >= 0) outside canonical planetary families (giant, neptune, rocky, sub-neptune, super-earth, ocean). Unassigned statistical noise (cluster_label = -1) is strictly excluded.
 **Total novel-taxonomy planets:** {len(alert2_df)}
 
 | Planet | Cluster | Name | Dist to Centroid | Hab Score |

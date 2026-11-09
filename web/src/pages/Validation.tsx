@@ -166,9 +166,9 @@ export default function Validation() {
   }))
 
   const orbConfData = [
-    { name: 'High (≥90%)', value: orb.high_confidence || 820, fill: '#10b981' },
-    { name: 'Mid (80-90%)', value: orb.mid_confidence || 180, fill: '#f59e0b' },
-    { name: 'Low (<80%)', value: orb.low_confidence || 38, fill: '#ef4444' },
+    { name: 'High (≥90%)', value: orb?.high_confidence ?? 0, fill: '#10b981' },
+    { name: 'Mid (80-90%)', value: orb?.mid_confidence ?? 0, fill: '#f59e0b' },
+    { name: 'Low (<80%)', value: orb?.low_confidence ?? 0, fill: '#ef4444' },
   ]
 
   const habHistData = (hab.histogram || []).map((h: any) => ({
