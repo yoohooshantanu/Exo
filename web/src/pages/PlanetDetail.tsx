@@ -50,7 +50,7 @@ function tierLabel(s: number): string {
 export default function PlanetDetail() {
   const { name } = useParams<{ name: string }>()
   const { data: planet, isLoading, isError: pError, refetch: refetchPlanet } = usePlanet(name ?? '')
-  const { data: spectrum, isError: sError, refetch: refetchSpectrum } = useSpectrum(name ?? '')
+  const { data: spectrum, isLoading: isSpectrumLoading, isError: sError, refetch: refetchSpectrum } = useSpectrum(name ?? '')
   const specId = spectrum?.spec_id ?? ''
   
   const queryClient = useQueryClient()
@@ -431,7 +431,47 @@ export default function PlanetDetail() {
       </Card>
 
       {/* ── Spectrum & Explainability Layer ────────────────────────── */}
-      {spectrumData.length > 0 ? (
+      {isSpectrumLoading ? (
+        <Card className="border border-zinc-800/80 bg-zinc-950/60">
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Atmospheric Transmission Spectrum</CardTitle>
+            <CardDescription>Loading spectroscopic data...</CardDescription>
+          </CardHeader>
+          <CardContent className="h-48 flex items-center justify-center">
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          </CardContent>
+        </Card>
+      ) : sError ? (
+        <div className="h-48">
+          <ErrorCard
+            message="Unable to load spectrum data."
+            onRetry={() => { refetchSpectrum(); }}
+          />
+        </div>
+      ) : !spectrum || spectrumData.length === 0 ? (
+        <Card className="border border-zinc-800/80 bg-zinc-950/60">
+          <CardHeader>
+            <CardTitle className="text-sm font-medium text-white flex items-center gap-2">
+              <Telescope className="size-4 text-zinc-400" />
+              <span>Atmospheric Transmission Spectrum</span>
+            </CardTitle>
+            <CardDescription className="text-xs text-zinc-400">
+              Spectroscopic observation status &amp; follow-up priority
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/40 p-4 text-xs text-zinc-400 space-y-1.5">
+              <p className="text-zinc-200 font-medium font-mono">
+                No Transmission Spectrum Ingested Yet
+              </p>
+              <p className="leading-relaxed">
+                No transmission spectrum is currently ingested in the Exo database for this target. 
+                This system is prioritized as a candidate for JWST Cycles 4–5 and ground-based ELT spectroscopic follow-up based on its Geometric Observability Index ({planet.observability_index?.toFixed(1) ?? '75.0'}).
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
@@ -512,29 +552,6 @@ export default function PlanetDetail() {
             <div className="mt-4 flex items-center justify-center gap-2 text-xs text-muted-foreground">
               <span className="w-4 border-t border-destructive border-dashed"></span>
               <span>Template Cross-Correlation Peaks (HITRAN)</span>
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card className="border border-zinc-800/80 bg-zinc-950/60">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium text-white flex items-center gap-2">
-              <Telescope className="size-4 text-zinc-400" />
-              <span>Atmospheric Transmission Spectrum</span>
-            </CardTitle>
-            <CardDescription className="text-xs text-zinc-400">
-              Spectroscopic observation status &amp; follow-up priority
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/40 p-4 text-xs text-zinc-400 space-y-1.5">
-              <p className="text-zinc-200 font-medium font-mono">
-                No Transmission Spectrum Ingested Yet
-              </p>
-              <p className="leading-relaxed">
-                Atmospheric transmission or emission spectra have not yet been observed or archived for <strong className="text-zinc-300">{planet.planet_name}</strong>. 
-                This system is prioritized as a candidate for JWST Cycles 4–5 and ground-based ELT spectroscopic follow-up based on its Geometric Observability Index ({planet.observability_index?.toFixed(1) ?? '75.0'}).
-              </p>
             </div>
           </CardContent>
         </Card>

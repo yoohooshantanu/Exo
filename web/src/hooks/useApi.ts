@@ -33,7 +33,6 @@ export function useSpectrum(name: string) {
     queryKey: ['spectrum', name],
     queryFn: () => api.spectrum(name),
     enabled: !!name,
-    retry: false,
   })
 }
 
