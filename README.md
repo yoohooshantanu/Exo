@@ -209,7 +209,7 @@ Compares transit/eclipse spectra against HITRAN molecular templates to identify 
 | **3. Scale-Height Filter** | Expected max transit depth from planet gravity + star radius: Δ_max = 2R_p·H/R_s². Excess beyond 2× this → masked as systematic. |
 | **4. Stellar Contamination** | M-dwarf hosts: H₂O penalized −0.5σ, CO −0.3σ. K-dwarfs: H₂O −0.3σ. Unocculted starspots mimic planetary absorption. |
 | **5. Instrument Weighting** | JWST = 1.0×, HST = 0.85×, Spitzer = 0.70×, ground/unknown = 0.60×. |
-| **6. Abiotic Reasoning** | CH₄ without CO₂ → −1.0σ. H₂O+CH₄+O₃ all ≥3σ → "triple biosignature" (abiotic unlikely). NH₃ on rocky → +0.5σ boost. SO₂ on rocky → volcanic flag. |
+| **6. Abiotic Reasoning** | CH4 without CO2 → -1.0σ. H2O+CH4+O3 all ≥3σ → candidate photochemical disequilibrium pattern (abiotic = None pending stellar UV & volcanic false-positive modeling). NH3 on rocky → +0.5σ boost. SO2 on rocky → volcanic flag. |
 | **7. Multi-Epoch** | Detected in ≥2 independent spectra → +0.5σ. Only 1 of N spectra → −0.5σ. |
 | **8. Classification** | ≥3σ + ≥3 template feature peaks → **Statistically significant screening candidate**. ≥2σ + ≥2 peaks → **Tier 2 marginal candidate**. |
 
@@ -251,7 +251,7 @@ radius · density · period · equilibrium temperature · semi-major axis
 - Period and semi-major axis log-transformed before StandardScaler.
 - Clusters auto-named from centroid properties (e.g., "Hot Giant", "Temperate Rocky").
 - Clusters with no NASA classification analog → flagged as **novel populations**.
-- HDBSCAN noise points (label = −1) → truly unique planets that fit nothing.
+- HDBSCAN noise points (label = -1) → unassigned statistical noise/outliers (strictly excluded from novel archetype discovery alerts).
 
 <br>
 
@@ -268,7 +268,7 @@ flowchart LR
     AF["anomaly_flags"] -- "JOIN" --> AH["🔴 Alert 1\nAnomalous + Habitable"]
     HS["habitability_scores"] -- "JOIN" --> AH
 
-    TC["taxonomy_clusters"] -- "label = -1\nor no NASA analog" --> NT["🟡 Alert 2\nNovel Taxonomy"]
+    TC["taxonomy_clusters"] -- "reproducible cluster (>=0)\noutside standard families" --> NT["🟡 Alert 2\nNovel Archetype Candidate"]
 
     OP["orbital_predictions"] -- "JOIN" --> GB["🟢 Alert 3\nGap + Biosignature"]
     MD["molecule_detections"] -- "JOIN" --> GB

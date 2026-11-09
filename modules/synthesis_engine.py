@@ -91,7 +91,7 @@ def query_novel_taxonomy(session):
                 tc.distance_to_centroid,
                 tc.run_at
             FROM taxonomy_clusters tc
-            ORDER BY tc.planet_id, tc.run_at DESC
+            ORDER BY tc.planet_id, tc.run_at DESC, tc.cluster_label DESC
         )
         SELECT
             p.planet_name,
@@ -115,6 +115,9 @@ def query_novel_taxonomy(session):
               OR LOWER(lt.cluster_name) LIKE '%earth%'
               OR LOWER(lt.cluster_name) LIKE '%jupiter%'
               OR LOWER(lt.cluster_name) LIKE '%saturn%'
+              OR LOWER(lt.cluster_name) LIKE '%water world%'
+              OR LOWER(lt.cluster_name) LIKE '%ocean%'
+              OR LOWER(lt.cluster_name) LIKE '%terrestrial%'
           )
         ORDER BY hs.composite_score DESC NULLS LAST
     """), {"score_ver": SCORE_VERSION}).fetchall()

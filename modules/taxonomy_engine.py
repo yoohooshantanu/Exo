@@ -248,7 +248,7 @@ def compute_cluster_stats(df, labels):
         t_centroid = centroid.get("eq_temperature_k")
         name = auto_name_cluster(r_centroid, t_centroid) if r_centroid else "Unknown"
         if label == -1:
-            name = "Unique Archetype (unique planets)"
+            name = "Unassigned Outlier (HDBSCAN Noise)"
 
         # Check if matches a NASA classification
         has_nasa_match = any(nc.lower() in name.lower() for nc in NASA_CLASSES)

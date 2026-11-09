@@ -608,7 +608,7 @@ def cross_reference(session, planet_detections):
 def generate_report(enriched, all_detections, marginal_sigma=MARGINAL_SIGMA):
     """Generate markdown biosignature discovery report."""
     date_str = datetime.now().strftime("%Y-%m-%d")
-    confirmed = [d for d in all_detections if d.get("tier") == "confirmed"]
+    confirmed = [d for d in all_detections if d.get("tier") in ("screening_candidate", "confirmed")]
     marginal = [d for d in all_detections if d.get("tier") == "marginal"]
 
     md = f"""# Biosignature Detection Report
@@ -616,7 +616,7 @@ def generate_report(enriched, all_detections, marginal_sigma=MARGINAL_SIGMA):
 
 ## Summary
 - **Planets analyzed:** {len(enriched)}
-- **Tier 1 (confirmed ≥{CONFIRMED_SIGMA}σ):** {len(confirmed)} detections across {len(set(d['planet_name'] for d in confirmed))} planets
+- **Tier 1 (screening candidate ≥{CONFIRMED_SIGMA}σ):** {len(confirmed)} candidate detections across {len(set(d['planet_name'] for d in confirmed))} planets
 - **Tier 2 (marginal {marginal_sigma}–{CONFIRMED_SIGMA}σ):** {len(marginal)} detections across {len(set(d.get('planet_name','') for d in marginal))} planets
 
 ## Tier 1 — Spectral Excess Flagged for Retrieval (≥{CONFIRMED_SIGMA}σ)
@@ -626,7 +626,7 @@ def generate_report(enriched, all_detections, marginal_sigma=MARGINAL_SIGMA):
 """
     for entry in sorted(enriched, key=lambda x: x.get("hab_score") or 0, reverse=True):
         for d in sorted(entry["detections"], key=lambda x: -x["detection_sigma"]):
-            if d.get("tier") != "confirmed":
+            if d.get("tier") not in ("screening_candidate", "confirmed"):
                 continue
             hab = f"{entry['hab_score']:.3f}" if entry.get("hab_score") else "—"
             ln_b = f"{d.get('log_evidence', 0.0):.1f}"
@@ -934,7 +934,7 @@ def run(planet_name=None, threshold=None, dry_run=False, validate=False):
                 planet_detections[pname] = planet_dets
 
         elapsed = time.perf_counter() - t0
-        confirmed = [d for d in all_detections if d.get("tier") == "confirmed"]
+        confirmed = [d for d in all_detections if d.get("tier") in ("screening_candidate", "confirmed")]
         marginal = [d for d in all_detections if d.get("tier") == "marginal"]
 
         print(f"\n{'='*60}")
@@ -974,12 +974,12 @@ def run(planet_name=None, threshold=None, dry_run=False, validate=False):
         # High-priority alerts
         alerts = [e for e in enriched
                   if e.get("hab_score") and e["hab_score"] > 0.5
-                  and any(d["tier"] == "confirmed" for d in e["detections"])]
+                  and any(d["tier"] in ("screening_candidate", "confirmed") for d in e["detections"])]
         if alerts:
             print(f"\n[ALERT] HIGH-PRIORITY ALERTS (hab_score > 0.5 + confirmed biosig):")
             for a in sorted(alerts, key=lambda x: -(x["hab_score"] or 0)):
                 mols = [MOL_NAMES[d["molecule"]] for d in a["detections"]
-                        if d["tier"] == "confirmed"]
+                        if d["tier"] in ("screening_candidate", "confirmed")]
                 print(f"  * {a['planet_name']}  hab={a['hab_score']:.3f}  "
                       f"molecules: {', '.join(mols)}")
 

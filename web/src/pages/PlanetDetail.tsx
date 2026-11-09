@@ -321,7 +321,7 @@ export default function PlanetDetail() {
                   <ChartTooltip 
                     content={
                       <ChartTooltipContent 
-                        formatter={(value, _name, item: any) => item?.payload?.isMissing ? "Unmeasured (0.000)" : `${(Number(value) / 100).toFixed(3)} (${value}%)`} 
+                        formatter={(value, _name, item: any) => item?.payload?.isMissing ? "Unmeasured" : `${(Number(value) / 100).toFixed(3)} (${value}%)`} 
                       />
                     } 
                   />

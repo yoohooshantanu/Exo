@@ -21,6 +21,7 @@ import {
 import type { ChartConfig } from '@/components/ui/chart'
 import { api } from '@/lib/api'
 import { Link } from 'react-router-dom'
+import { ErrorCard } from '@/components/ErrorCard'
 
 const MOL_LABELS: Record<string, string> = {
   h2o: 'H₂O', co2: 'CO₂', o3: 'O₃', ch4: 'CH₄',
@@ -29,7 +30,7 @@ const MOL_LABELS: Record<string, string> = {
 
 // Chart configs
 const molBarConfig = {
-  confirmed: { label: 'Confirmed (≥3σ)', color: 'var(--chart-1)' },
+  confirmed: { label: 'Screening Candidates (≥3σ)', color: 'var(--chart-1)' },
   marginal: { label: 'Marginal (2-3σ)', color: 'var(--chart-3)' },
 } satisfies ChartConfig
 
@@ -106,11 +107,18 @@ const JWST_QUINTILE_DATA = [
 export default function Validation() {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const fetchMetrics = () => {
+    setLoading(true)
+    setError(null)
     api.validationMetrics()
       .then(d => { setData(d); setLoading(false) })
-      .catch(() => setLoading(false))
+      .catch((err) => { setError(err?.message || "Failed to load validation metrics"); setLoading(false) })
+  }
+
+  useEffect(() => {
+    fetchMetrics()
   }, [])
 
   if (loading) {
@@ -127,15 +135,27 @@ export default function Validation() {
     )
   }
 
-  const bio = data?.biosignatures ?? { total_detections: 709, total_confirmed: 245, by_molecule: [] }
-  const orb = data?.orbital ?? { total_predictions: 1038, avg_confidence: 88.4, high_confidence: 820, mid_confidence: 180, low_confidence: 38, by_resonance: [] }
-  const hab = data?.habitability ?? { total_scored: 50035, avg_score: 0.38, min_score: 0.05, max_score: 0.98, tier1_count: 142, tier2_count: 2480, tier3_count: 47413, histogram: [] }
-  const anom = data?.anomalies ?? { total_flags: 945, by_type: [] }
-  const ret = data?.retrievals ?? { completed: 18, running: 2, failed: 0 }
+  if (error || !data) {
+    return (
+      <div className="max-w-6xl mx-auto py-12">
+        <ErrorCard 
+          message={error || "Failed to load live validation execution metrics from pipeline backend."} 
+          onRetry={fetchMetrics} 
+        />
+      </div>
+    )
+  }
+
+  const bio = data.biosignatures
+  const orb = data.orbital
+  const hab = data.habitability
+  const anom = data.anomalies
+  const ret = data.retrievals
 
   const molChartData = (bio.by_molecule || []).map((m: any) => ({
     molecule: MOL_LABELS[m.molecule] || m.molecule,
-    confirmed: m.confirmed,
+    screening_candidates: m.screening_candidates ?? m.confirmed,
+    confirmed: m.screening_candidates ?? m.confirmed,
     marginal: m.marginal,
     avgSigma: m.avg_sigma,
   }))
@@ -365,7 +385,7 @@ export default function Validation() {
               <div className="space-y-3 pt-4 border-t border-zinc-800/80">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-mono uppercase tracking-wider text-zinc-400">
-                    Real-World JWST Spectroscopy Target Cross-Check
+                    External Published Reference Benchmarks: JWST Cycles 1–3 Spectroscopy
                   </h4>
                   <Badge variant="outline" className="text-[10px] font-mono border-zinc-800 text-zinc-400">
                     Cycles 1–3 Programs
@@ -471,7 +491,7 @@ export default function Validation() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-sm font-medium text-white">
-                    University of Puerto Rico (UPR) ESI Catalog Comparison
+                    External Published Reference Benchmarks: UPR ESI Catalog Baseline
                   </CardTitle>
                   <CardDescription className="text-xs text-zinc-400 mt-1">
                     Cross-validation against 20 benchmark exoplanets from the Planetary Habitability Laboratory (PHL) at UPR Arecibo.
@@ -543,7 +563,7 @@ export default function Validation() {
                   </Badge>
                 </div>
                 <CardDescription className="text-xs text-zinc-400">
-                  Confirmed (≥3σ) vs Marginal (2–3σ) spectral template correlations
+                  Screening Candidates (≥3σ) vs Marginal (2–3σ) spectral template correlations
                 </CardDescription>
               </CardHeader>
               <CardContent>
