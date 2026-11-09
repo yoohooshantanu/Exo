@@ -184,9 +184,7 @@ export default function PlanetDetail() {
                   <div className="text-2xl font-light text-chart-1">
                     {planet.observability_index != null
                       ? planet.observability_index.toFixed(1)
-                      : (planet.score_breakdown?.data_quality != null
-                          ? Math.min(100, (planet.score_breakdown.data_quality * 5.0 + 35)).toFixed(1)
-                          : '—')}
+                      : '—'}
                   </div>
                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1" title="Geometric SNR / TSM-style proxy">Observability</p>
                 </div>
@@ -194,9 +192,7 @@ export default function PlanetDetail() {
                   <div className="text-2xl font-light text-chart-2">
                     {planet.physical_triage_index != null
                       ? planet.physical_triage_index.toFixed(1)
-                      : (planet.score_breakdown?.habitability != null
-                          ? Math.max(0, planet.score_breakdown.habitability + (planet.score_breakdown.anomaly_penalty || 0)).toFixed(1)
-                          : '—')}
+                      : '—'}
                   </div>
                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1" title="Habitability − Anomaly Penalty">Physical Triage</p>
                 </div>
@@ -204,9 +200,7 @@ export default function PlanetDetail() {
                   <div className="text-2xl font-light text-chart-3">
                     {planet.characterization_index != null
                       ? planet.characterization_index.toFixed(1)
-                      : (planet.score_breakdown?.biosignature != null
-                          ? Math.min(100, Math.max(0, planet.score_breakdown.biosignature * 3.5 + 25)).toFixed(1)
-                          : '—')}
+                      : '—'}
                   </div>
                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1" title="Biosignatures + Data Quality (Post-observation enrichment)">Characterization</p>
                 </div>

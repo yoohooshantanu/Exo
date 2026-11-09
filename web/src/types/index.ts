@@ -197,7 +197,7 @@ export interface MoleculeDetectionItem {
   detection_sigma: number
   wavelength_um?: number
   hitran_match_count?: number
-  abiotic_ruled_out?: boolean
+  abiotic_ruled_out?: boolean | null
   instrument?: string
   facility?: string
   method_notes?: string
