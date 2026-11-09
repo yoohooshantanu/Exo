@@ -2,7 +2,7 @@
 
 There are over 6,000 confirmed exoplanets in the NASA archive. Each has measured radius, mass, orbital period, temperature, host star properties — but that data lives across different catalogs, and actually deciding which planets deserve follow-up observation means juggling habitability estimates, spectral data, orbital stability simulations, and anomaly detection separately.
 
-I built this to do all of that in one place. The platform pulls the full NASA archive, scores every planet for habitability and environmental risk, runs N-body simulations to predict where undiscovered planets should be, matches spectra against HITRAN molecular lines, flags statistical outliers, and rolls everything into a single 0–100 **Discovery Score**. There's a FastAPI backend, a React dashboard with a 3D star map, and the whole thing runs from `docker-compose up`.
+I built this to do all of that in one place. The platform pulls the full NASA archive, scores every planet for habitability and environmental risk, runs N-body simulations to predict where undiscovered planets should be, screens spectra against molecular cross-section templates, flags statistical outliers, and rolls everything into a single 0–100 **Discovery Score**. There's a FastAPI backend, a React dashboard with a 3D star map, and the whole thing runs from `docker-compose up`.
 
 ```mermaid
 flowchart LR
@@ -174,7 +174,7 @@ Candidates with Δ < 10 R_H to either neighbor → rejected without integration.
 | Stage | Trials | Duration | Reject If |
 |:---|---:|:---|:---|
 | Fast screen | 5 | 5,000 orbits | MEGNO > 3.0 or ΔE/E > 10⁻⁴. Require ≥ 75% pass. |
-| Deep validation | 20 | 50,000 orbits | e_max > 0.25 or Δa/a > 0.1. Require ≥ 80% pass to publish. |
+| Deep validation | 20 | 50,000 orbits | Integration duration strictly checked (≥90% of requested orbits). e_max > 0.25 or Δa/a > 0.1. |
 
 **Step 5 — One prediction per gap.**
 First stable resonance wins (MMRs first — physically motivated).
@@ -211,7 +211,7 @@ Compares transit/eclipse spectra against HITRAN molecular templates to identify 
 | **5. Instrument Weighting** | JWST = 1.0×, HST = 0.85×, Spitzer = 0.70×, ground/unknown = 0.60×. |
 | **6. Abiotic Reasoning** | CH₄ without CO₂ → −1.0σ. H₂O+CH₄+O₃ all ≥3σ → "triple biosignature" (abiotic unlikely). NH₃ on rocky → +0.5σ boost. SO₂ on rocky → volcanic flag. |
 | **7. Multi-Epoch** | Detected in ≥2 independent spectra → +0.5σ. Only 1 of N spectra → −0.5σ. |
-| **8. Classification** | ≥3σ + ≥3 HITRAN lines → **Tier 1 confirmed**. ≥2σ + ≥2 lines → **Tier 2 marginal**. |
+| **8. Classification** | ≥3σ + ≥3 template feature peaks → **Statistically significant screening candidate**. ≥2σ + ≥2 peaks → **Tier 2 marginal candidate**. |
 
 </details>
 
@@ -315,7 +315,7 @@ Measures **what the astronomical community has already verified** post-observati
 
 $$\text{Characterization} = \text{clamp}\left(0, 100, \Big[\min(\text{Biosig Score}, 25) + \text{Data Quality Score}\Big] \times \frac{100}{40}\right)$$
 
-- **Biosig Score** ($0 - 25$): Weighted by the count of $\ge 3\sigma$ HITRAN molecular detections scaled by signal significance:
+- **Biosig Score** ($0 - 25$): Weighted by the count of $\ge 3\sigma$ candidate molecular-template detections scaled by signal significance:
   $$\text{Biosig Score} = N_{\ge 3\sigma} \times 5.0 \times \left(0.5 + 0.5 \times \frac{\min(\overline{\sigma}, 10.0)}{5.0}\right)$$
 - **Data Quality Score** ($0 - 15$): Spectra presence ($+5$), best instrument tier ($+5$ for JWST, $+3.5$ for HST, $+2$ for other), and parameter completeness ($+1$ each for $R_p, M_p, P, T_{\text{eq}}, a$).
 

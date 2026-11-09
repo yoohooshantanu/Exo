@@ -65,16 +65,17 @@ export default function PlanetDetail() {
 
   const radarData = useMemo(() => {
     if (!planet) return []
-    const toPercent = (v?: number | null) => (v != null && v > 0 ? Number((v * 100).toFixed(1)) : 0)
+    // Retain all 7 axes; plot genuine zero or missing as 0 while distinguishing missing in raw
+    const toPercent = (v?: number | null) => (v != null && v >= 0 ? Number((v * 100).toFixed(1)) : 0)
     return [
-      { axis: 'Radius', value: toPercent(planet.habitability.radius_esi_score) },
-      { axis: 'Mass', value: toPercent(planet.habitability.mass_esi_score) },
-      { axis: 'Temp', value: toPercent(planet.habitability.teq_score) },
-      { axis: 'HZ', value: toPercent(planet.habitability.hz_score) },
-      { axis: 'Tidal', value: toPercent(planet.anomaly_risk.tidal_lock_score) },
-      { axis: 'Escape', value: toPercent(planet.anomaly_risk.xuv_escape_score) },
-      { axis: 'Ecc', value: toPercent(planet.habitability.eccentricity_score) },
-    ].filter(d => d.value > 0)
+      { axis: 'Radius', value: toPercent(planet.habitability.radius_esi_score), isMissing: planet.habitability.radius_esi_score == null },
+      { axis: 'Mass', value: toPercent(planet.habitability.mass_esi_score), isMissing: planet.habitability.mass_esi_score == null },
+      { axis: 'Temp', value: toPercent(planet.habitability.teq_score), isMissing: planet.habitability.teq_score == null },
+      { axis: 'HZ', value: toPercent(planet.habitability.hz_score), isMissing: planet.habitability.hz_score == null },
+      { axis: 'Tidal', value: toPercent(planet.anomaly_risk.tidal_lock_score), isMissing: planet.anomaly_risk.tidal_lock_score == null },
+      { axis: 'Escape', value: toPercent(planet.anomaly_risk.xuv_escape_score), isMissing: planet.anomaly_risk.xuv_escape_score == null },
+      { axis: 'Ecc', value: toPercent(planet.habitability.eccentricity_score), isMissing: planet.habitability.eccentricity_score == null },
+    ]
   }, [planet])
 
   const riskData = useMemo(() => {
@@ -320,7 +321,7 @@ export default function PlanetDetail() {
                   <ChartTooltip 
                     content={
                       <ChartTooltipContent 
-                        formatter={(value) => `${(Number(value) / 100).toFixed(3)} (${value}%)`} 
+                        formatter={(value, _name, item: any) => item?.payload?.isMissing ? "Unmeasured (0.000)" : `${(Number(value) / 100).toFixed(3)} (${value}%)`} 
                       />
                     } 
                   />

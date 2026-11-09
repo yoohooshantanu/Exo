@@ -177,9 +177,8 @@ def run_megno(m_star: float, planets: list, test_a: float,
     except rebound.Collision:
         return False, 999.0, 0, "collision"
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return False, 999.0, 0, "collision"
+        logger.exception("Unexpected N-body simulation failure: %s", e)
+        return False, None, 0, "simulation_error"
 # ── System processing ─────────────────────────────────────────────────────────
 MMR_CANDIDATES = [
     ("2:1 MMR inner", lambda a1, a2: a1 * (2.0) ** (2/3)),

@@ -1,3 +1,4 @@
+import { ApiError } from '@/lib/api'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
@@ -10,8 +11,18 @@ const qc = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 30_000,
-      retry: 3,
-      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
+      retry: (failureCount, error: any) => {
+        // Immediately reject non-retryable 4xx client errors
+        if (error instanceof ApiError && [400, 401, 403, 404].includes(error.status)) {
+          return false
+        }
+        if (error?.status && [400, 401, 403, 404].includes(error.status)) {
+          return false
+        }
+        // Allow up to 6 retries for Render cold start (2s + 4s + 8s + 10s + 10s + 10s = 44s)
+        return failureCount < 6
+      },
+      retryDelay: (attempt) => Math.min(2000 * 2 ** attempt, 10000),
     },
   },
 })

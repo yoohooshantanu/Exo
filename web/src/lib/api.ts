@@ -1,3 +1,17 @@
+export class ApiError extends Error {
+  status: number
+  statusText: string
+  body?: any
+
+  constructor(status: number, statusText: string, body?: any) {
+    super(`HTTP ${status}: ${statusText}`)
+    this.name = 'ApiError'
+    this.status = status
+    this.statusText = statusText
+    this.body = body
+  }
+}
+
 export const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000'
 
 async function fetchJson<T>(path: string, params?: Record<string, unknown>, init?: RequestInit): Promise<T> {
@@ -11,7 +25,13 @@ async function fetchJson<T>(path: string, params?: Record<string, unknown>, init
   }
   const res = await fetch(url.toString(), init)
   if (!res.ok) {
-    throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+    let body: any
+    try {
+      body = await res.json()
+    } catch {
+      // response not JSON
+    }
+    throw new ApiError(res.status, res.statusText, body)
   }
   return res.json()
 }
@@ -32,8 +52,11 @@ export const api = {
     try {
       return await fetchJson<import('@/types').SpectrumView>(`/api/planets/${encodeURIComponent(name)}/spectrum`)
     } catch (err: any) {
-      // Return null when planet lacks synthetic/observed spectra so UI shows fallback without throwing uncaught 404
-      return null
+      // Only convert 404 (absent spectra for this target) to null; throw 500, 429, timeouts, and network failures
+      if (err instanceof ApiError && err.status === 404) {
+        return null
+      }
+      throw err
     }
   },
 

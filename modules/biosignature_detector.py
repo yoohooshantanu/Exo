@@ -51,7 +51,8 @@ Session = sessionmaker(bind=engine)
 # 2σ marginal threshold is used for watchlist candidates pending confirmation
 CONFIRMED_SIGMA  = 3.0   # Tier 1
 MARGINAL_SIGMA   = 2.0   # Tier 2 floor
-MIN_HITRAN_MATCH = 2     # require ≥2 HITRAN lines for valid detection
+MIN_TEMPLATE_FEATURE_PEAKS = 2  # require ≥2 discrete template feature peaks
+MIN_HITRAN_MATCH = MIN_TEMPLATE_FEATURE_PEAKS  # Alias preserved for backwards compatibility
 CONTINUUM_BINS   = 5     # ±N bins for continuum estimation
 WAVELENGTH_TOL   = 0.05  # µm tolerance for HITRAN line matching
 POLY_DEGREE      = 3     # Legendre polynomial degree for continuum
@@ -397,7 +398,8 @@ def unmix_spectrum(spectrum_df, templates_dict, phys_params):
                 "molecule": mol,
                 "detection_sigma": round(sigma, 3),
                 "wavelength_um": round(peak_wl, 4),
-                "hitran_match_count": int(feature_peak_count),
+                "template_feature_peak_count": int(feature_peak_count),
+                "hitran_match_count": int(feature_peak_count),  # backwards compatibility
                 "depth_excess_ppm": round(float(mean_excess), 3),
                 "log_evidence": log_evidence,
                 "is_muted": is_muted,
@@ -492,16 +494,18 @@ def classify_detection(det, all_detections_for_planet, phys_params, host_spectra
 
     det["detection_sigma"] = round(sigma, 3)
 
-    # 4. Tier classification
+    # 4. Tier classification (screening candidate vs marginal)
+    # Note: ≥3 peaks and ≥3σ represent a statistically significant screening candidate,
+    # not a definitive molecular discovery (which requires line-by-line instrumental calibration).
     if matches >= 3 and sigma >= CONFIRMED_SIGMA:
-        tier = "confirmed"
-        notes = f"Spectral excess flagged for retrieval ({sigma:.1f}σ, {matches} lines). " + notes
+        tier = "screening_candidate"
+        notes = f"Statistically significant template match ({sigma:.1f}σ, {matches} feature peaks; candidate screened). " + notes
     elif matches >= 2 and sigma >= marginal_sigma:
         tier = "marginal"
-        notes = f"Tier 2 marginal ({sigma:.1f}σ, {matches} lines). " + notes
+        notes = f"Tier 2 marginal match ({sigma:.1f}σ, {matches} feature peaks). " + notes
     else:
         tier = "rejected"
-        notes = f"Rejected ({sigma:.1f}σ, {matches} lines). " + notes
+        notes = f"Rejected ({sigma:.1f}σ, {matches} feature peaks). " + notes
 
     det["abiotic_ruled_out"] = abiotic
     det["method_notes"] = notes.strip()

@@ -78,36 +78,46 @@ def query_anomalous_habitable(session):
 
 def query_novel_taxonomy(session):
     """Planets in clusters with no NASA classification analog, or noise points."""
+    # Scientifically rigorous ordering:
+    # 1. Select the LATEST taxonomy classification per planet.
+    # 2. Filter out noise assignments on that latest run (cluster_label = -1 is statistical noise, not a novel archetype).
+    # 3. Determine novelty by base planetary family rather than fragile prefix matching.
     rows = session.execute(text("""
-        SELECT *
-        FROM (
-            SELECT DISTINCT ON (p.planet_id)
-                p.planet_name,
-                p.planet_id,
-                s.hip_name AS hostname,
+        WITH latest_taxonomy AS (
+            SELECT DISTINCT ON (tc.planet_id)
+                tc.planet_id,
                 tc.cluster_label,
                 tc.cluster_name,
                 tc.distance_to_centroid,
-                hs.composite_score
+                tc.run_at
             FROM taxonomy_clusters tc
-            JOIN planets p ON tc.planet_id = p.planet_id
-            JOIN stars s ON p.star_id = s.star_id
-            LEFT JOIN habitability_scores hs
-                ON hs.planet_id = p.planet_id
-                AND hs.model_version = :score_ver
-            -- Scientifically accurate: Exclude cluster_label = -1 (HDBSCAN unassigned statistical noise)
-            -- Only reproducible clusters (cluster_label >= 0) outside known canonical archetypes qualify as candidate novel
-            WHERE tc.cluster_label >= 0
-              AND tc.cluster_name NOT IN (
-                  'Hot Giant', 'Warm Giant', 'Cold Giant', 'Gas Giant',
-                  'Hot Sub-Neptune', 'Warm Sub-Neptune', 'Cold Sub-Neptune', 'Sub-Neptune',
-                  'Hot Rocky', 'Temperate Rocky', 'Cold Rocky', 'Warm Rocky', 'Rocky',
-                  'Neptune-class', 'Super-Earth'
-              )
-            ORDER BY p.planet_id, tc.run_at DESC
-        ) sub
-        ORDER BY composite_score DESC NULLS LAST
-    """), {"score_ver": SCORE_VERSION, "min_habitability": 0.60}).fetchall()
+            ORDER BY tc.planet_id, tc.run_at DESC
+        )
+        SELECT
+            p.planet_name,
+            p.planet_id,
+            s.hip_name AS hostname,
+            lt.cluster_label,
+            lt.cluster_name,
+            lt.distance_to_centroid,
+            hs.composite_score
+        FROM latest_taxonomy lt
+        JOIN planets p ON lt.planet_id = p.planet_id
+        JOIN stars s ON p.star_id = s.star_id
+        LEFT JOIN habitability_scores hs
+            ON hs.planet_id = p.planet_id
+            AND hs.model_version = :score_ver
+        WHERE lt.cluster_label >= 0
+          AND NOT (
+              LOWER(lt.cluster_name) LIKE '%giant%'
+              OR LOWER(lt.cluster_name) LIKE '%neptune%'
+              OR LOWER(lt.cluster_name) LIKE '%rocky%'
+              OR LOWER(lt.cluster_name) LIKE '%earth%'
+              OR LOWER(lt.cluster_name) LIKE '%jupiter%'
+              OR LOWER(lt.cluster_name) LIKE '%saturn%'
+          )
+        ORDER BY hs.composite_score DESC NULLS LAST
+    """), {"score_ver": SCORE_VERSION}).fetchall()
 
     cols = ["planet_name", "planet_id", "hostname", "cluster_label",
             "cluster_name", "distance_to_centroid", "composite_score"]
