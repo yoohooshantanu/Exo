@@ -299,25 +299,24 @@ ORDER BY wavelength_um
 SPECTRUM_DETECTIONS = text("""
 SELECT md.molecule, md.detection_sigma, md.wavelength_um, md.hitran_match_count,
        md.abiotic_ruled_out, md.instrument, md.facility, md.method_notes,
-       COALESCE(md.detection_tier,
-           CASE WHEN md.detection_sigma >= 3.0 AND COALESCE(md.hitran_match_count, 0) >= 3 THEN 'screening_candidate'
-                WHEN md.detection_sigma >= 2.0 AND COALESCE(md.hitran_match_count, 0) >= 2 THEN 'marginal'
-                ELSE 'rejected' END) AS detection_tier,
-       COALESCE(md.biosig_model_version, '3.0.0') AS biosig_model_version
+       md.detection_tier,
+       md.biosig_model_version
 FROM molecule_detections md
 JOIN planets p ON md.planet_id = p.planet_id
 WHERE p.planet_name = :planet_name
-  AND (md.detection_tier IN ('screening_candidate', 'marginal')
-       OR (md.detection_tier IS NULL AND md.detection_sigma >= 2.0 AND COALESCE(md.hitran_match_count, 0) >= 2))
+  AND md.spec_id = :spec_id
+  AND md.detection_tier IN ('screening_candidate', 'marginal')
 ORDER BY md.detection_sigma DESC
 """)
 
 HITRAN_LINES_FOR_PLANET = text("""
-SELECT h.wavelength_um, h.intensity, h.molecule
+SELECT DISTINCT h.wavelength_um, h.intensity, h.molecule
 FROM hitran_lines h
 JOIN molecule_detections md ON h.molecule = md.molecule
 JOIN planets p ON md.planet_id = p.planet_id
 WHERE p.planet_name = :planet_name
+  AND md.spec_id = :spec_id
+  AND md.detection_tier IN ('screening_candidate', 'marginal')
 ORDER BY h.intensity DESC LIMIT 500
 """)
 
@@ -408,8 +407,7 @@ SELECT
     mvs.physical_triage_index,
     mvs.characterization_index,
     CASE 
-        WHEN COALESCE(md.detection_tier, '') = 'screening_candidate' 
-             OR (md.detection_sigma >= 3.0 AND COALESCE(md.hitran_match_count, 0) >= 3) THEN 'Screening Candidate'
+        WHEN md.detection_tier = 'screening_candidate' THEN 'Screening Candidate'
         ELSE 'Marginal Detection'
     END AS category,
     md.molecule AS detail
@@ -417,8 +415,8 @@ FROM molecule_detections md
 JOIN planets p ON md.planet_id = p.planet_id
 JOIN stars s ON p.star_id = s.star_id
 LEFT JOIN mv_discovery_scores mvs ON mvs.planet_id = p.planet_id
-WHERE (md.detection_tier IN ('screening_candidate', 'marginal')
-       OR (md.detection_tier IS NULL AND md.detection_sigma >= 2.0 AND COALESCE(md.hitran_match_count, 0) >= 2))
+WHERE md.detection_tier IN ('screening_candidate', 'marginal')
+  AND md.biosig_model_version = :biosig_version
 GROUP BY p.planet_id, mvs.discovery_score, mvs.observability_index, mvs.physical_triage_index, mvs.characterization_index, p.planet_name, s.hip_name, s.star_id, md.molecule, md.detection_tier, md.detection_sigma, md.hitran_match_count
 ORDER BY mvs.characterization_index DESC NULLS LAST, MAX(md.detection_sigma) DESC
 LIMIT :limit
@@ -517,9 +515,8 @@ UNION ALL
     JOIN molecule_detections md ON md.planet_id = p2.planet_id
     LEFT JOIN habitability_scores hs
         ON hs.planet_id = p2.planet_id AND hs.model_version = :score_version
-    WHERE (md.detection_tier IN ('screening_candidate', 'marginal')
-           OR (md.detection_tier IS NULL AND md.detection_sigma >= 2.0 AND COALESCE(md.hitran_match_count, 0) >= 2))
-      AND COALESCE(md.biosig_model_version, :biosig_version) = :biosig_version
+    WHERE md.detection_tier IN ('screening_candidate', 'marginal')
+      AND md.biosig_model_version = :biosig_version
       AND op.model_version = :pred_version
 )
 ORDER BY created_at DESC

@@ -802,10 +802,12 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
     mol_rows = (await session.execute(text("""
         SELECT molecule, COUNT(*)::int as total,
                ROUND(AVG(detection_sigma)::numeric, 2) as avg_sigma,
-               SUM(CASE WHEN detection_sigma >= 3.0 AND COALESCE(hitran_match_count, 0) >= 3 THEN 1 ELSE 0 END)::int as confirmed,
-               SUM(CASE WHEN detection_sigma >= 2.0 AND COALESCE(hitran_match_count, 0) >= 2 AND NOT (detection_sigma >= 3.0 AND COALESCE(hitran_match_count, 0) >= 3) THEN 1 ELSE 0 END)::int as marginal
-        FROM molecule_detections GROUP BY molecule ORDER BY total DESC
-    """))).fetchall()
+               SUM(CASE WHEN detection_tier = 'screening_candidate' THEN 1 ELSE 0 END)::int as confirmed,
+               SUM(CASE WHEN detection_tier = 'marginal' THEN 1 ELSE 0 END)::int as marginal
+        FROM molecule_detections
+        WHERE biosig_model_version = :biosig_ver
+        GROUP BY molecule ORDER BY total DESC
+    """), {"biosig_ver": BIOSIG_VERSION})).fetchall()
 
     biosig_by_molecule = [
         {"molecule": r[0], "total": r[1], "avg_sigma": float(r[2]) if r[2] else 0,
@@ -856,7 +858,7 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
                SUM(CASE WHEN composite_score < 0.4 THEN 1 ELSE 0 END)::int
         FROM habitability_scores
         WHERE model_version = :score_ver
-    """))).fetchone()
+    """), {"score_ver": SCORE_VERSION})).fetchone()
 
     hab_histogram = (await session.execute(text("""
         SELECT
@@ -908,7 +910,7 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
 
     # Query live confirmed systems and latest pipeline run timestamp
     total_confirmed_planets = (await session.execute(text("SELECT COUNT(*) FROM planets WHERE status='confirmed'"))).scalar() or 0
-    latest_eval_time = (await session.execute(text("SELECT MAX(run_at) FROM ingestion_runs"))).scalar()
+    latest_eval_time = (await session.execute(text("SELECT MAX(finished_at) FROM ingestion_runs"))).scalar()
     if not latest_eval_time:
         latest_eval_time = (await session.execute(text("SELECT MAX(created_at) FROM habitability_scores"))).scalar()
     eval_iso_date = latest_eval_time.isoformat() if latest_eval_time else datetime.now(timezone.utc).isoformat()
@@ -930,39 +932,100 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
         """), {"rid": val_run["run_id"]})).mappings().all()
 
         res_map = {f"{r['benchmark_name']}::{r['metric_name']}": r for r in val_results}
-        
-        esi_pearson = res_map.get("UPR ESI Benchmark Correlation::Pearson r", {}).get("actual_value", 0.772)
-        esi_spearman = res_map.get("UPR ESI Benchmark Rank Order::Spearman rho", {}).get("actual_value", 0.806)
-        
-        earth_c = res_map.get("Solar System Sanity Control::Earth Composite Score", {}).get("actual_value", 0.868)
-        mars_c = res_map.get("Solar System Sanity Control::Mars Composite Score", {}).get("actual_value", 0.745)
-        venus_c = res_map.get("Solar System Sanity Control::Venus Composite Score", {}).get("actual_value", 0.480)
-        jupiter_c = res_map.get("Solar System Sanity Control::Jupiter Composite Score", {}).get("actual_value", 0.380)
+
+        # Track 1: ESI Pearson & Spearman Rank Order
+        p_row = res_map.get("UPR ESI Benchmark Correlation::Pearson r")
+        s_row = res_map.get("UPR ESI Benchmark Rank Order::Spearman rho")
+
+        # Track 2: Geometric Observability Power
+        obs_row = res_map.get("Geometric Observability Power::Odds Ratio")
+
+        # Track 3: Decoupled Decision Purity
+        triage_row = res_map.get("Decoupled Decision Purity::Triage Odds Ratio")
+
+        # Track 4: Solar System Control Separation
+        earth_row = res_map.get("Solar System Sanity Control::Earth Composite Score")
+        mars_row = res_map.get("Solar System Sanity Control::Mars Composite Score")
+        venus_row = res_map.get("Solar System Sanity Control::Venus Composite Score")
+        jupiter_row = res_map.get("Solar System Sanity Control::Jupiter Composite Score")
+
+        earth_c = earth_row["actual_value"] if earth_row and earth_row["actual_value"] is not None else None
+        mars_c = mars_row["actual_value"] if mars_row and mars_row["actual_value"] is not None else None
+        venus_c = venus_row["actual_value"] if venus_row and venus_row["actual_value"] is not None else None
+        jupiter_c = jupiter_row["actual_value"] if jupiter_row and jupiter_row["actual_value"] is not None else None
+
+        if all(v is not None for v in [earth_c, mars_c, venus_c, jupiter_c]):
+            track4_actual = f"{earth_c:.2f} > {mars_c:.2f} > {venus_c:.2f} > {jupiter_c:.2f}"
+            track4_pass = (earth_c > mars_c > venus_c > jupiter_c)
+        else:
+            track4_actual = None
+            track4_pass = False
 
         eval_date = val_run["completed_at"].isoformat() if val_run.get("completed_at") else eval_iso_date
-        
+        run_status = val_run["status"]
+        pipeline_status = "Online & Calibrated" if run_status == "completed" else "Failed"
+
+        tracks = []
+        if p_row and s_row:
+            p_val = p_row["actual_value"]
+            s_val = s_row["actual_value"]
+            t1_status = "PASS" if (p_row["status"] == "PASS" and s_row["status"] == "PASS") else "FAIL"
+            tracks.append({
+                "track": "UPR ESI Benchmark Correlation",
+                "target": "Pearson r >= 0.70 & Spearman rho >= 0.80",
+                "actual": round(p_val, 3) if p_val is not None else "N/A",
+                "spearman": round(s_val, 3) if s_val is not None else "N/A",
+                "status": t1_status,
+            })
+        if obs_row:
+            obs_val = obs_row["actual_value"]
+            obs_p = f"{obs_row['tolerance']:.2e}" if obs_row.get('tolerance') is not None else "N/A"
+            tracks.append({
+                "track": "Geometric Observability Power",
+                "target": "Odds Ratio >= 2.0 (p < 1e-4)",
+                "actual": round(obs_val, 2) if obs_val is not None else "N/A",
+                "p_value": obs_p,
+                "status": obs_row["status"],
+            })
+        if triage_row:
+            triage_val = triage_row["actual_value"]
+            triage_p = f"{triage_row['tolerance']:.2e}" if triage_row.get('tolerance') is not None else "N/A"
+            tracks.append({
+                "track": "Decoupled Decision Purity",
+                "target": "Habitability alone null (OR ~ 1.0)",
+                "actual": round(triage_val, 2) if triage_val is not None else "N/A",
+                "p_value": triage_p,
+                "status": triage_row["status"],
+            })
+        if track4_actual:
+            tracks.append({
+                "track": "Solar System Control Separation",
+                "target": "Earth > Mars > Venus > Jupiter",
+                "actual": track4_actual,
+                "status": "PASS" if track4_pass else "FAIL",
+            })
+
+        solar_system_controls = []
+        if all(v is not None for v in [earth_c, mars_c, venus_c, jupiter_c]):
+            solar_system_controls = [
+                {"planet": "Earth", "sim": round(earth_row["expected_value"], 3), "safety": round(earth_row["tolerance"], 3), "composite": round(earth_c, 3), "rationale": "Primary positive control (canonical habitability reference). Maximum terrestrial similarity and balanced magnetic/thermal environment.", "status": earth_row["status"]},
+                {"planet": "Mars", "sim": round(mars_row["expected_value"], 3), "safety": round(mars_row["tolerance"], 3), "composite": round(mars_c, 3), "rationale": "Sub-freezing terrestrial benchmark. High similarity index tempered by low surface pressure and atmospheric stripping.", "status": mars_row["status"]},
+                {"planet": "Venus", "sim": round(venus_row["expected_value"], 3), "safety": round(venus_row["tolerance"], 3), "composite": round(venus_c, 3), "rationale": "Twin radius/mass, but extreme runaway greenhouse thermal penalty correctly demotes composite habitability.", "status": venus_row["status"]},
+                {"planet": "Jupiter", "sim": round(jupiter_row["expected_value"], 3), "safety": round(jupiter_row["tolerance"], 3), "composite": round(jupiter_c, 3), "rationale": "Primary negative control. Giant gas envelope and extreme radiation belt trigger severe Fulton and non-terrestrial penalties.", "status": jupiter_row["status"]},
+            ]
+
         evaluation_run = {
             "run_id": str(val_run["run_id"]),
             "engine_version": val_run["engine_version"],
             "orbital_version": val_run["orbital_version"],
             "biosig_version": val_run["biosig_version"],
             "evaluation_date": eval_date,
-            "test_cases_evaluated": val_run["total_samples"] or habitability["total_scored"],
+            "test_cases_evaluated": val_run["total_samples"],
             "total_confirmed_planets": total_confirmed_planets,
             "benchmark_dataset": val_run["dataset_version"],
-            "pipeline_status": "Online & Calibrated" if val_run["status"] == "completed" else "Calibrating",
-            "tracks": [
-                {"track": "UPR ESI Benchmark Correlation", "target": "Pearson r >= 0.70", "actual": round(esi_pearson, 3), "spearman": round(esi_spearman, 3), "status": "PASS" if esi_pearson >= 0.70 else "FAIL"},
-                {"track": "Geometric Observability Power", "target": "Odds Ratio >= 2.0 (p < 1e-4)", "actual": 2.79, "p_value": "5.6e-15", "status": "PASS"},
-                {"track": "Decoupled Decision Purity", "target": "Habitability alone null (OR ~ 1.0)", "actual": 1.03, "p_value": "0.86", "status": "PASS"},
-                {"track": "Solar System Control Separation", "target": "Earth > Mars > Venus > Jupiter", "actual": f"{earth_c:.2f} > {mars_c:.2f} > {venus_c:.2f} > {jupiter_c:.2f}", "status": "PASS" if earth_c > mars_c > venus_c > jupiter_c else "FAIL"},
-            ],
-            "solar_system_controls": [
-                {"planet": "Earth", "sim": 1.000, "safety": 0.840, "composite": round(earth_c, 3), "rationale": "Primary positive control (canonical habitability reference). Maximum terrestrial similarity and balanced magnetic/thermal environment.", "status": "PASS"},
-                {"planet": "Mars", "sim": 0.790, "safety": 0.710, "composite": round(mars_c, 3), "rationale": "Sub-freezing terrestrial benchmark. High similarity index tempered by low surface pressure and atmospheric stripping.", "status": "PASS"},
-                {"planet": "Venus", "sim": 0.780, "safety": 0.180, "composite": round(venus_c, 3), "rationale": "Twin radius/mass, but extreme runaway greenhouse thermal penalty correctly demotes composite habitability.", "status": "PASS"},
-                {"planet": "Jupiter", "sim": 0.290, "safety": 0.470, "composite": round(jupiter_c, 3), "rationale": "Primary negative control. Giant gas envelope and extreme radiation belt trigger severe Fulton and non-terrestrial penalties.", "status": "PASS"},
-            ]
+            "pipeline_status": pipeline_status,
+            "tracks": tracks,
+            "solar_system_controls": solar_system_controls,
         }
     else:
         evaluation_run = {
@@ -970,12 +1033,12 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
             "orbital_version": PRED_VERSION,
             "biosig_version": BIOSIG_VERSION,
             "evaluation_date": eval_iso_date,
-            "test_cases_evaluated": habitability["total_scored"],
+            "test_cases_evaluated": 0,
             "total_confirmed_planets": total_confirmed_planets,
             "benchmark_dataset": "UPR Published Catalog + NASA Exoplanet Archive + Gaia DR3",
-            "pipeline_status": "Online & Calibrated",
+            "pipeline_status": "Not evaluated",
             "tracks": [],
-            "solar_system_controls": []
+            "solar_system_controls": [],
         }
 
     return {

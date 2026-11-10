@@ -110,3 +110,46 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+def compute_jwst_validation_metrics(engine):
+    jwst_df = pd.read_csv('jwst_targets.csv')
+    jwst_targets = set(jwst_df['pl_name'].str.strip())
+    
+    query = """
+    SELECT 
+        p.planet_name,
+        p.discovery_year,
+        mvs.physical_triage_index,
+        mvs.observability_index
+    FROM planets p
+    LEFT JOIN mv_discovery_scores mvs ON mvs.planet_id = p.planet_id
+    WHERE p.status = 'confirmed' AND mvs.physical_triage_index IS NOT NULL AND mvs.observability_index IS NOT NULL
+    """
+    
+    df = pd.read_sql(query, engine)
+    df = df[df['discovery_year'] <= 2023].copy()
+    df['is_jwst_target'] = df['planet_name'].isin(jwst_targets).astype(int)
+    
+    df['triage_z'] = (df['physical_triage_index'] - df['physical_triage_index'].mean()) / df['physical_triage_index'].std()
+    df['obs_z'] = (df['observability_index'] - df['observability_index'].mean()) / df['observability_index'].std()
+    
+    X = sm.add_constant(df[['triage_z', 'obs_z']])
+    y = df['is_jwst_target']
+    
+    res = sm.Logit(y, X).fit(disp=0)
+    
+    obs_or = float(np.exp(res.params['obs_z']))
+    obs_p = float(res.pvalues['obs_z'])
+    triage_or = float(np.exp(res.params['triage_z']))
+    triage_p = float(res.pvalues['triage_z'])
+    
+    return {
+        "obs_or": round(obs_or, 2),
+        "obs_p": f"{obs_p:.2e}",
+        "obs_p_val": obs_p,
+        "triage_or": round(triage_or, 2),
+        "triage_p": f"{triage_p:.2e}",
+        "triage_p_val": triage_p,
+        "n_samples": len(df),
+        "passed": bool(obs_or >= 2.0 and obs_p < 1e-4)
+    }
