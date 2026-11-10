@@ -490,11 +490,11 @@ async def get_spectrum(request: Request, planet_name: str, session: AsyncSession
     )).mappings().all()
 
     detections = (await session.execute(
-        q.SPECTRUM_DETECTIONS, {"planet_name": planet_name}
+        q.SPECTRUM_DETECTIONS, {"planet_name": planet_name, "spec_id": spec_id}
     )).mappings().all()
 
     hitran = (await session.execute(
-        q.HITRAN_LINES_FOR_PLANET, {"planet_name": planet_name}
+        q.HITRAN_LINES_FOR_PLANET, {"planet_name": planet_name, "spec_id": spec_id}
     )).mappings().all()
 
     return SpectrumView(
@@ -913,7 +913,7 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
     latest_eval_time = (await session.execute(text("SELECT MAX(finished_at) FROM ingestion_runs"))).scalar()
     if not latest_eval_time:
         latest_eval_time = (await session.execute(text("SELECT MAX(created_at) FROM habitability_scores"))).scalar()
-    eval_iso_date = latest_eval_time.isoformat() if latest_eval_time else datetime.now(timezone.utc).isoformat()
+    eval_iso_date = latest_eval_time.isoformat() if hasattr(latest_eval_time, "isoformat") else datetime.now(timezone.utc).isoformat()
 
     # Empirical scientific validation execution records from database
     val_run = (await session.execute(text("""
@@ -941,7 +941,7 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
         obs_row = res_map.get("Geometric Observability Power::Odds Ratio")
 
         # Track 3: Decoupled Decision Purity
-        triage_row = res_map.get("Decoupled Decision Purity::Triage Odds Ratio")
+        triage_row = res_map.get("Historical JWST Selection Independence Analysis::Triage Odds Ratio") or res_map.get("Decoupled Decision Purity::Triage Odds Ratio")
 
         # Track 4: Solar System Control Separation
         earth_row = res_map.get("Solar System Sanity Control::Earth Composite Score")
@@ -991,8 +991,8 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
             triage_val = triage_row["actual_value"]
             triage_p = f"{triage_row['tolerance']:.2e}" if triage_row.get('tolerance') is not None else "N/A"
             tracks.append({
-                "track": "Decoupled Decision Purity",
-                "target": "Habitability alone null (OR ~ 1.0)",
+                "track": "Historical JWST Selection Independence Analysis",
+                "target": "Selection orthogonality (OR ~ 1.0, CI includes 1.0)",
                 "actual": round(triage_val, 2) if triage_val is not None else "N/A",
                 "p_value": triage_p,
                 "status": triage_row["status"],

@@ -302,3 +302,180 @@ class TestApiStructure:
         assert response.status_code == 202
         assert response.json()["status"] == "running"
         app.dependency_overrides.clear()
+
+
+# ── Spectrum & Validation Integrity Integration Tests ───────────────────────
+
+class TestSpectrumEndpointBinding:
+    def test_get_spectrum_binds_spec_id_and_returns_view(self):
+        """Verify that GET /api/planets/{planet_name}/spectrum binds spec_id and does not raise 500."""
+        from api.main import app
+        from api.db import get_db
+
+        session = AsyncMock()
+
+        # Mock spectra list with multiple observations
+        mock_specs = MagicMock()
+        mock_specs.mappings.return_value.all.return_value = [
+            {"spec_id": "spec-obs-1", "instrument": "NIRSpec", "facility": "JWST", "obs_type": "transmission"},
+            {"spec_id": "spec-obs-2", "instrument": "WFC3", "facility": "HST", "obs_type": "transmission"},
+        ]
+
+        mock_points = MagicMock()
+        mock_points.mappings.return_value.all.return_value = [
+            {"point_id": 1, "wavelength_um": 1.4, "depth_ppm": 1200.0, "depth_err_upper": 20.0, "depth_err_lower": 20.0}
+        ]
+
+        mock_detections = MagicMock()
+        mock_detections.mappings.return_value.all.return_value = [
+            {
+                "molecule": "H2O", "detection_sigma": 4.2, "confidence": 0.95,
+                "detection_tier": "screening_candidate", "hitran_match_count": 5,
+                "features_analyzed": 6, "snr": 8.5, "model_version": "3.0.0",
+                "abiotic_ruled_out": False
+            }
+        ]
+
+        mock_hitran = MagicMock()
+        mock_hitran.mappings.return_value.all.return_value = [
+            {"molecule": "H2O", "wavelength_um": 1.4, "intensity": 0.8}
+        ]
+
+        session.execute.side_effect = [mock_specs, mock_points, mock_detections, mock_hitran]
+        session.close = AsyncMock()
+
+        async def override_get_db():
+            yield session
+
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+
+        response = client.get("/api/planets/K2-18%20b/spectrum")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["spec_id"] == "spec-obs-1"
+        assert len(data["points"]) == 1
+        assert len(data["detections"]) == 1
+        assert data["detections"][0]["molecule"] == "H2O"
+
+        # Verify that calls 3 and 4 received spec_id="spec-obs-1"
+        call_args_list = session.execute.call_args_list
+        assert len(call_args_list) == 4
+        # call 2 is SPECTRUM_POINTS
+        assert call_args_list[1][0][1] == {"spec_id": "spec-obs-1"}
+        # call 3 is SPECTRUM_DETECTIONS -> must receive planet_name AND spec_id
+        assert call_args_list[2][0][1] == {"planet_name": "K2-18 b", "spec_id": "spec-obs-1"}
+        # call 4 is HITRAN_LINES_FOR_PLANET -> must receive planet_name AND spec_id
+        assert call_args_list[3][0][1] == {"planet_name": "K2-18 b", "spec_id": "spec-obs-1"}
+
+        app.dependency_overrides.clear()
+
+
+class TestValidationIntegrityEndpoints:
+    def test_solar_system_control_failure_cannot_display_as_pass(self):
+        """Verify that if a Solar System control fails, the API does not mask it as PASS."""
+        from api.main import app
+        from api.db import get_db
+
+        session = AsyncMock()
+
+        # Mock validation_runs
+        val_run_mock = MagicMock()
+        val_run_mock.mappings.return_value.one_or_none.return_value = {
+            "run_id": "mock-run-uuid",
+            "engine_version": "5.0.0",
+            "orbital_version": "3.1.0",
+            "biosig_version": "3.0.0",
+            "dataset_version": "UPR + NASA",
+            "started_at": None,
+            "completed_at": None,
+            "total_samples": 4611,
+            "status": "failed",
+        }
+
+        # Mock validation_results with a failed Earth control
+        val_res_mock = MagicMock()
+        val_res_mock.mappings.return_value.all.return_value = [
+            {
+                "benchmark_name": "Solar System Sanity Control",
+                "metric_name": "Earth Composite Score",
+                "expected_value": 1.0,
+                "actual_value": 0.40,  # Below threshold
+                "tolerance": 0.50,
+                "sample_count": 1,
+                "status": "FAIL",      # Explicitly failed
+            },
+            {
+                "benchmark_name": "Solar System Sanity Control",
+                "metric_name": "Mars Composite Score",
+                "expected_value": 0.72,
+                "actual_value": 0.74,
+                "tolerance": 0.20,
+                "sample_count": 1,
+                "status": "PASS",
+            },
+            {
+                "benchmark_name": "Solar System Sanity Control",
+                "metric_name": "Venus Composite Score",
+                "expected_value": 0.39,
+                "actual_value": 0.41,
+                "tolerance": 0.10,
+                "sample_count": 1,
+                "status": "PASS",
+            },
+            {
+                "benchmark_name": "Solar System Sanity Control",
+                "metric_name": "Jupiter Composite Score",
+                "expected_value": 0.24,
+                "actual_value": 0.0,
+                "tolerance": 0.0,
+                "sample_count": 1,
+                "status": "PASS",
+            },
+        ]
+
+        from datetime import datetime, timezone
+        generic_scalar = MagicMock()
+        generic_scalar.scalar.return_value = 100
+        dt_scalar = MagicMock()
+        dt_scalar.scalar.return_value = datetime.now(timezone.utc)
+        generic_fetchall = MagicMock()
+        generic_fetchall.fetchall.return_value = []
+        generic_fetchone = MagicMock()
+        generic_fetchone.fetchone.return_value = None
+
+        def side_effect_fn(*args, **kwargs):
+            query_str = str(args[0]) if args else ""
+            if "FROM validation_runs" in query_str:
+                return val_run_mock
+            elif "FROM validation_results" in query_str:
+                return val_res_mock
+            elif "SELECT MAX(" in query_str:
+                return dt_scalar
+            elif "SELECT COUNT(*)" in query_str:
+                return generic_scalar
+            elif "GROUP BY" in query_str:
+                return generic_fetchall
+            else:
+                return generic_fetchone
+
+        session.execute.side_effect = side_effect_fn
+        session.close = AsyncMock()
+
+        async def override_get_db():
+            yield session
+
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+
+        response = client.get("/api/validation/metrics")
+        assert response.status_code == 200
+        data = response.json()
+        eval_run = data["evaluation_run"]
+        assert eval_run["pipeline_status"] == "Failed"
+
+        controls = {c["planet"]: c for c in eval_run["solar_system_controls"]}
+        assert controls["Earth"]["status"] == "FAIL"
+        assert controls["Earth"]["status"] != "PASS"
+
+        app.dependency_overrides.clear()

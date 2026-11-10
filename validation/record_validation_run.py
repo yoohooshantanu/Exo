@@ -119,12 +119,12 @@ def record_empirical_run():
         "status": "PASS" if jwst_passed else "FAIL"
     })
 
-    # Track 3: Decoupled Decision Purity
+    # Track 3: Historical JWST Selection Independence Analysis
     session.execute(text("""
         INSERT INTO validation_results (
             run_id, benchmark_name, metric_name, expected_value, actual_value, tolerance, sample_count, status
         ) VALUES (
-            :run_id, 'Decoupled Decision Purity', 'Triage Odds Ratio', 1.00, :actual, :tol, :samples, :status
+            :run_id, 'Historical JWST Selection Independence Analysis', 'Triage Odds Ratio', 1.00, :actual, :tol, :samples, :status
         )
     """), {
         "run_id": run_id,
@@ -149,23 +149,47 @@ def record_empirical_run():
             "status": "PASS" if r.passed else "FAIL"
         })
 
-    # Solar System Planet Controls
+    # Solar System Planet Controls (Dynamically evaluated individually)
+    earth_c = sanity_scores.get("Earth", {}).get("composite_score", 0.0)
+    mars_c = sanity_scores.get("Mars", {}).get("composite_score", 0.0)
+    venus_c = sanity_scores.get("Venus", {}).get("composite_score", 0.0)
+    jupiter_c = sanity_scores.get("Jupiter", {}).get("composite_score", 0.0)
+    monotonic_passed = (earth_c > mars_c > venus_c >= jupiter_c)
+
     for name, s in sanity_scores.items():
         comp_val = s.get("composite_score") or 0.0
         sim_val = s.get("similarity_score") or 0.0
         safe_val = s.get("safety_score") or 0.0
+        
+        # Derive planet status from individual assertions and physical criteria
+        planet_assertions = [r for r in sanity_results if r.name.startswith(name)]
+        all_planet_assertions_passed = len(planet_assertions) > 0 and all(r.passed for r in planet_assertions)
+        
+        planet_valid = all_planet_assertions_passed and monotonic_passed
+        if name == "Earth" and (comp_val < 0.75 or sim_val < 0.85):
+            planet_valid = False
+        elif name == "Venus" and comp_val >= 0.50:
+            planet_valid = False
+        elif name == "Mars" and sim_val >= 0.80:
+            planet_valid = False
+        elif name == "Jupiter" and comp_val >= 0.40:
+            planet_valid = False
+
+        status_str = "PASS" if planet_valid else "FAIL"
+
         session.execute(text("""
             INSERT INTO validation_results (
                 run_id, benchmark_name, metric_name, expected_value, actual_value, tolerance, sample_count, status
             ) VALUES (
-                :run_id, 'Solar System Sanity Control', :metric, :expected, :actual, :safe, 1, 'PASS'
+                :run_id, 'Solar System Sanity Control', :metric, :expected, :actual, :safe, 1, :status
             )
         """), {
             "run_id": run_id,
             "metric": f"{name} Composite Score",
             "expected": float(sim_val),
             "actual": float(comp_val),
-            "safe": float(safe_val)
+            "safe": float(safe_val),
+            "status": status_str
         })
 
     session.commit()
