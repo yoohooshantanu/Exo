@@ -16,9 +16,10 @@ Scientific Methodology & Limitations:
 3. Intra-System Correlation:
    Standard errors are clustered on host stars (star_id) to account for correlated
    allocation probability among planets orbiting the same host star.
-4. Selection Orthogonality:
-   The selection independence track analyzes whether physical triage ranking is decoupled
-   from operational transit bias (OR ~ 1.0, 95% CI containing 1.0).
+4. Selection Equivalence:
+   The selection equivalence track analyzes whether physical triage ranking has an estimated
+   association within predefined operational-equivalence bounds (OR in [0.70, 1.45], unrounded
+   95% CI within [0.70, 1.45]), rather than claiming strict orthogonality.
 """
 import os
 import sys
@@ -155,10 +156,12 @@ def compute_jwst_validation_metrics(engine):
         "obs_p": f"{obs_p:.2e}",
         "obs_p_val": obs_p,
         "obs_ci": obs_ci,
+        "obs_ci_raw": obs_ci_raw,
         "triage_or": round(triage_or, 2),
         "triage_p": f"{triage_p:.2e}",
         "triage_p_val": triage_p,
         "triage_ci": triage_ci,
+        "triage_ci_raw": triage_ci_raw,
         "n_samples": n_samples,
         "passed": bool(obs_passed and triage_passed),
         "obs_passed": obs_passed,

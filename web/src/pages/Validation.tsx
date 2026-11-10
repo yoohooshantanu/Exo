@@ -79,12 +79,6 @@ const UPR_BENCHMARKS = [
   { planet: "HD 40307 g", ours: 0.743, published: 0.740, delta: "+0.003", status: "PASS", note: "Sub-Neptune border candidate" },
 ]
 
-const SOLAR_SYSTEM_CONTROLS = [
-  { planet: "Earth", sim: 1.000, safety: 0.730, composite: 0.919, criterion: "Composite ≥ 0.75", pass: true, rationale: "Control baseline (G-dwarf, stable circular orbit, thick atmosphere)" },
-  { planet: "Mars", sim: 0.721, safety: 0.803, composite: 0.746, criterion: "Similarity < 0.80", pass: true, rationale: "Correctly penalized for sub-optimal mass and low thermal equilibrium" },
-  { planet: "Venus", sim: 0.390, safety: 0.703, composite: 0.484, criterion: "Composite < 0.50", pass: true, rationale: "Crushed by runaway greenhouse temperature (Teq = 735 K)" },
-  { planet: "Jupiter", sim: 0.239, safety: 0.694, composite: 0.375, criterion: "Composite < 0.40", pass: true, rationale: "Gaseous giant lacking solid surface (P_rocky = 0.0)" },
-]
 
 const JWST_OBSERVATION_CHECKS = [
   { target: "WASP-39 b", type: "Hot Saturn", species: "CO₂, H₂O, SO₂, CO", program: "ERS 1366 / GO 3474", result: "CONFIRMED", agreement: "100%", note: "First detection of SO₂ (photochemistry) & clear CO₂ peak" },
@@ -321,7 +315,7 @@ export default function Validation() {
             <span className="text-zinc-200 font-medium">Habitability v{data?.evaluation_run?.engine_version ?? "5.0.0"} &bull; Orbit v{data?.evaluation_run?.orbital_version ?? "3.1.0"} &bull; Biosig v{data?.evaluation_run?.biosig_version ?? "3.0.0"}</span>
           </div>
           <p className="text-[11px] text-zinc-400">
-            Source: <strong>{data?.evaluation_run?.benchmark_dataset ?? "UPR Published Catalog + NASA Exoplanet Archive + Gaia DR3"}</strong> ({data?.evaluation_run?.test_cases_evaluated?.toLocaleString() ?? "4,611"} confirmed systems evaluated)
+            Source: <strong>{data?.evaluation_run?.benchmark_dataset ?? "UPR Published Catalog + NASA Exoplanet Archive + Gaia DR3"}</strong> ({data?.evaluation_run?.test_cases_evaluated != null ? `${data.evaluation_run.test_cases_evaluated.toLocaleString()} confirmed systems evaluated` : "Evaluation pending"})
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -374,9 +368,9 @@ export default function Validation() {
               </div>
               <CardDescription className="text-xs text-zinc-400 leading-relaxed pt-1">
                 A common trap in exoplanet scoring is building monolithic indices that falsely claim to &ldquo;predict&rdquo; telescope allocations.
-                By evaluating <strong>{data?.evaluation_run?.test_cases_evaluated?.toLocaleString() ?? "5,587"} pre-2024 confirmed exoplanets</strong> against real approved JWST Cycles 1–3 spectroscopic targets with host-star clustered standard errors,
-                we analyze how physical habitability triage relates to operational target allocation (adjusted OR = {track3?.actual ?? "1.22"}, p = {track3?.p_value ?? "9.3e-03"}).
-                Target selection is almost entirely dictated by the <strong>Geometric Observability Proxy</strong> (adjusted OR = {track2?.actual ?? "2.69"}, p = {track2?.p_value ?? "5.0e-80"}).
+                By evaluating <strong>{data?.evaluation_run?.test_cases_evaluated ? `${data.evaluation_run.test_cases_evaluated.toLocaleString()} pre-2024 confirmed exoplanets` : "pre-2024 confirmed exoplanets"}</strong> against real approved JWST Cycles 1–3 spectroscopic targets with host-star clustered standard errors,
+                we analyze how physical habitability triage relates to operational target allocation{track3?.actual !== undefined && track3?.actual !== null ? ` (adjusted OR = ${track3.actual}${track3.p_value ? `, p = ${track3.p_value}` : ""})` : ""}.
+                Target selection is strongly dictated by the <strong>Geometric Observability Proxy</strong>{track2?.actual !== undefined && track2?.actual !== null ? ` (adjusted OR = ${track2.actual}${track2.p_value ? `, p = ${track2.p_value}` : ""})` : ""}.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-6">
@@ -406,35 +400,39 @@ export default function Validation() {
                     Multivariate Logistic Regression Model
                   </h4>
                   <p className="text-[11px] text-zinc-400 font-sans leading-relaxed">
-                    Model: <code className="text-zinc-200 font-mono bg-zinc-900/80 px-1.5 py-0.5 rounded border border-zinc-800">Logit(is_jwst_target ~ Observability_z + Habitability_z)</code>
+                    Model: <code className="text-zinc-200 font-mono bg-zinc-900/80 px-1.5 py-0.5 rounded border border-zinc-800">Logit(is_jwst_target ~ Observability_z + Physical_Triage_z)</code>
                   </p>
                   
                   <div className="space-y-3 pt-2">
                     <div className="flex justify-between items-center border-b border-zinc-800 pb-2">
                       <span className="text-zinc-400">Observability Proxy (z)</span>
                       <div className="text-right">
-                        <span className="text-zinc-100 font-mono font-medium">OR = {track2?.actual ?? "2.69"}</span>
-                        <span className="text-[10px] text-zinc-400 ml-2">(p = {track2?.p_value ?? "5.0e-80"})</span>
+                        <span className="text-zinc-100 font-mono font-medium">OR = {track2?.actual !== undefined && track2?.actual !== null ? track2.actual : "N/A"}</span>
+                        <span className="text-[10px] text-zinc-400 ml-2">(p = {track2?.p_value ?? "N/A"})</span>
                       </div>
                     </div>
                     <div className="flex justify-between items-center border-b border-zinc-800 pb-2">
-                      <span className="text-zinc-400">Historical Selection Independence (z)</span>
+                      <span className="text-zinc-400">Physical Triage Selection Equivalence (z)</span>
                       <div className="text-right">
-                        <span className="text-zinc-300 font-semibold">OR = {track3?.actual ?? "1.22"}</span>
-                        <span className="text-[10px] text-zinc-400 ml-2">(p = {track3?.p_value ?? "9.3e-03"} &bull; Orthogonal)</span>
+                        <span className="text-zinc-300 font-semibold">OR = {track3?.actual !== undefined && track3?.actual !== null ? track3.actual : "N/A"}</span>
+                        <span className="text-[10px] text-zinc-400 ml-2">(p = {track3?.p_value ?? "N/A"} &bull; Equivalence Bounds [0.70, 1.45])</span>
                       </div>
                     </div>
                     <div className="flex justify-between items-center border-b border-zinc-800 pb-2">
-                      <span className="text-zinc-400">Operational Equivalence Bounds</span>
+                      <span className="text-zinc-400">Operational Equivalence Assessment</span>
                       <div className="text-right">
-                        <span className="text-emerald-400 font-mono font-medium">OR &isin; [0.70, 1.45]</span>
-                        <span className="text-[10px] text-zinc-400 ml-2">(Passed &bull; 95% CI inside)</span>
+                        <span className={track3?.status === "PASS" ? "text-emerald-400 font-mono font-medium" : "text-zinc-400 font-mono font-medium"}>
+                          {track3?.status === "PASS" ? "Passed (within [0.70, 1.45])" : track3?.status ? "Failed" : "Not evaluated"}
+                        </span>
+                        <span className="text-[10px] text-zinc-400 ml-2">
+                          {track3?.ci ? `(95% CI: [${track3.ci[0]}, ${track3.ci[1]}])` : ""}
+                        </span>
                       </div>
                     </div>
                   </div>
 
                   <p className="text-[11px] text-zinc-400 font-sans leading-relaxed pt-1">
-                    <strong>Takeaway for Astronomers:</strong> The apparent correlation of physical habitability with observation was driven entirely by famous multi-planet outliers (e.g. TRAPPIST-1). Separating Physical Triage from Observability gives proposal PIs the only honest, unconfounded target selection tool.
+                    <strong>Takeaway for Astronomers:</strong> Physical triage has an estimated association within predefined operational-equivalence bounds [0.70, 1.45]. Separating Physical Triage from Observability ensures physical scoring is assessed on environmental criteria while observability captures operational detectability.
                   </p>
                 </div>
               </div>
@@ -524,27 +522,37 @@ export default function Validation() {
                   </TableRow>
                 </TableHeader>
                 <TableBody className="font-mono text-xs">
-                  {(data?.evaluation_run?.solar_system_controls ?? SOLAR_SYSTEM_CONTROLS).map((ctrl: any) => (
-                    <TableRow key={ctrl.planet} className="border-zinc-800/60 hover:bg-zinc-900/30">
-                      <TableCell className="font-medium text-white">{ctrl.planet}</TableCell>
-                      <TableCell className="text-right text-zinc-300">{ctrl.sim.toFixed(3)}</TableCell>
-                      <TableCell className="text-right text-zinc-300">{ctrl.safety.toFixed(3)}</TableCell>
-                      <TableCell className="text-right font-semibold text-zinc-300">{ctrl.composite.toFixed(3)}</TableCell>
-                      <TableCell className="text-zinc-400 font-sans text-xs">{ctrl.rationale}</TableCell>
-                      <TableCell className="text-center">
-                        <Badge 
-                          variant="outline" 
-                          className={`text-[10px] font-mono ${
-                            ctrl.status === "PASS"
-                              ? "border-emerald-800/60 text-emerald-400 bg-emerald-950/40"
-                              : "border-red-800/60 text-red-400 bg-red-950/40"
-                          }`}
-                        >
-                          {ctrl.status ?? "PASS"}
-                        </Badge>
+                  {solarControls.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-zinc-500 py-6">
+                        No live Solar System validation run recorded. Run validation suite to record calibration benchmarks.
                       </TableCell>
                     </TableRow>
-                  ))}
+                  ) : (
+                    solarControls.map((ctrl: any) => (
+                      <TableRow key={ctrl.planet} className="border-zinc-800/60 hover:bg-zinc-900/30">
+                        <TableCell className="font-medium text-white">{ctrl.planet}</TableCell>
+                        <TableCell className="text-right text-zinc-300">{ctrl.sim != null ? ctrl.sim.toFixed(3) : "N/A"}</TableCell>
+                        <TableCell className="text-right text-zinc-300">{ctrl.safety != null ? ctrl.safety.toFixed(3) : "N/A"}</TableCell>
+                        <TableCell className="text-right font-semibold text-zinc-300">{ctrl.composite != null ? ctrl.composite.toFixed(3) : "N/A"}</TableCell>
+                        <TableCell className="text-zinc-400 font-sans text-xs">{ctrl.rationale}</TableCell>
+                        <TableCell className="text-center">
+                          <Badge 
+                            variant="outline" 
+                            className={`text-[10px] font-mono ${
+                              ctrl.status === "PASS"
+                                ? "border-emerald-800/60 text-emerald-400 bg-emerald-950/40"
+                                : ctrl.status === "FAIL"
+                                ? "border-red-800/60 text-red-400 bg-red-950/40"
+                                : "border-zinc-800 text-zinc-400 bg-zinc-900/40"
+                            }`}
+                          >
+                            {ctrl.status ?? "Not evaluated"}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
                 </TableBody>
               </Table>
             </CardContent>
