@@ -956,7 +956,14 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
 
         if all(v is not None for v in [earth_c, mars_c, venus_c, jupiter_c]):
             track4_actual = f"{earth_c:.2f} > {mars_c:.2f} > {venus_c:.2f} > {jupiter_c:.2f}"
-            track4_pass = (earth_c > mars_c > venus_c > jupiter_c)
+            all_controls_stored_pass = all(
+                row and row.get("status") == "PASS"
+                for row in [earth_row, mars_row, venus_row, jupiter_row]
+            )
+            track4_pass = bool(
+                all_controls_stored_pass
+                and (earth_c > mars_c > venus_c > jupiter_c)
+            )
         else:
             track4_actual = None
             track4_pass = False

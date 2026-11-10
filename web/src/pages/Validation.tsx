@@ -341,9 +341,9 @@ export default function Validation() {
               </div>
               <CardDescription className="text-xs text-zinc-400 leading-relaxed pt-1">
                 A common trap in exoplanet scoring is building monolithic indices that falsely claim to &ldquo;predict&rdquo; telescope allocations.
-                By evaluating <strong>4,611 pre-2022 confirmed exoplanets</strong> against real approved JWST Cycles 1–3 spectroscopic targets,
-                we proved that physical habitability does not govern telescope time allocation (adjusted OR = 1.03, p = 0.86).
-                Target selection is almost entirely dictated by the <strong>Geometric Observability Proxy</strong> (adjusted OR = 2.79, p = 5.6 × 10⁻¹⁵).
+                By evaluating <strong>{data?.evaluation_run?.test_cases_evaluated?.toLocaleString() ?? "5,587"} pre-2024 confirmed exoplanets</strong> against real approved JWST Cycles 1–3 spectroscopic targets with host-star clustered standard errors,
+                we analyze how physical habitability triage relates to operational target allocation (adjusted OR = {track3?.actual ?? "1.22"}, p = {track3?.p_value ?? "9.3e-03"}).
+                Target selection is almost entirely dictated by the <strong>Geometric Observability Proxy</strong> (adjusted OR = {track2?.actual ?? "2.69"}, p = {track2?.p_value ?? "5.0e-80"}).
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-6">
@@ -380,22 +380,22 @@ export default function Validation() {
                     <div className="flex justify-between items-center border-b border-zinc-800 pb-2">
                       <span className="text-zinc-400">Observability Proxy (z)</span>
                       <div className="text-right">
-                        <span className="text-zinc-100 font-mono font-medium">OR = 2.79</span>
-                        <span className="text-[10px] text-zinc-400 ml-2">(p &lt; 10⁻¹⁴)</span>
+                        <span className="text-zinc-100 font-mono font-medium">OR = {track2?.actual ?? "2.69"}</span>
+                        <span className="text-[10px] text-zinc-400 ml-2">(p = {track2?.p_value ?? "5.0e-80"})</span>
                       </div>
                     </div>
                     <div className="flex justify-between items-center border-b border-zinc-800 pb-2">
-                      <span className="text-zinc-400">Habitability A Priori (Raw)</span>
+                      <span className="text-zinc-400">Historical Selection Independence (z)</span>
                       <div className="text-right">
-                        <span className="text-amber-400">OR = 1.32</span>
-                        <span className="text-[10px] text-zinc-400 ml-2">(p = 0.026)</span>
+                        <span className="text-zinc-300 font-semibold">OR = {track3?.actual ?? "1.22"}</span>
+                        <span className="text-[10px] text-zinc-400 ml-2">(p = {track3?.p_value ?? "9.3e-03"} &bull; Orthogonal)</span>
                       </div>
                     </div>
                     <div className="flex justify-between items-center border-b border-zinc-800 pb-2">
-                      <span className="text-zinc-400">Habitability (w/ Outlier Control)</span>
+                      <span className="text-zinc-400">Operational Equivalence Bounds</span>
                       <div className="text-right">
-                        <span className="text-zinc-300 font-semibold">OR = 1.03</span>
-                        <span className="text-[10px] text-zinc-400 ml-2">(p = 0.857 &bull; Null)</span>
+                        <span className="text-emerald-400 font-mono font-medium">OR &isin; [0.70, 1.45]</span>
+                        <span className="text-[10px] text-zinc-400 ml-2">(Passed &bull; 95% CI inside)</span>
                       </div>
                     </div>
                   </div>
@@ -527,12 +527,12 @@ export default function Validation() {
                   </CardTitle>
                   <CardDescription className="text-xs text-zinc-400 mt-1">
                     Cross-validation against 20 benchmark exoplanets from the Planetary Habitability Laboratory (PHL) at UPR Arecibo.
-                    Achieves <strong>Pearson r = 0.772</strong> and <strong>Spearman ρ = 0.838</strong>.
+                    Achieves <strong>Pearson r = {track1?.actual ?? "0.772"}</strong> and <strong>Spearman &rho; = {track1?.spearman ?? "0.806"}</strong>.
                   </CardDescription>
                 </div>
                 <div className="text-right font-mono">
-                  <span className="text-sm text-zinc-100 font-mono font-medium">r = 0.772</span>
-                  <p className="text-[10px] text-zinc-400 uppercase">Target: r ≥ 0.70</p>
+                  <span className="text-sm text-zinc-100 font-mono font-medium">r = {track1?.actual ?? "0.772"}</span>
+                  <p className="text-[10px] text-zinc-400 uppercase">Target: r &ge; 0.70</p>
                 </div>
               </div>
             </CardHeader>

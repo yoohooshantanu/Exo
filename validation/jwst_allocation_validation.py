@@ -77,10 +77,11 @@ def compute_jwst_validation_metrics(engine):
     n_samples = len(df)
     n_targets = int(df['is_jwst_target'].sum())
 
-    # Robustness checks: guard against insufficient samples, zero variance, or complete separation
+    # Robustness checks: guard against insufficient samples, zero variance, complete separation, or collinear predictors
     if (
         n_samples < 20
         or n_targets == 0
+        or n_targets == n_samples
         or df['observability_index'].std() == 0
         or df['physical_triage_index'].std() == 0
     ):
@@ -95,6 +96,7 @@ def compute_jwst_validation_metrics(engine):
             "triage_ci": [1.0, 1.0],
             "n_samples": n_samples,
             "passed": False,
+            "inference_method": "insufficient_data",
         }
 
     # Standardize continuous predictors
@@ -106,13 +108,16 @@ def compute_jwst_validation_metrics(engine):
 
     # Clustered standard errors by host star (star_id)
     groups = pd.factorize(df['star_id'])[0]
+    inference_method = "cluster_robust"
     try:
         res = sm.Logit(y, X).fit(cov_type='cluster', cov_kwds={'groups': groups}, disp=0)
     except Exception:
         try:
             res = sm.Logit(y, X).fit(cov_type='HC1', disp=0)
+            inference_method = "HC1_robust_fallback"
         except Exception:
             res = sm.Logit(y, X).fit(disp=0)
+            inference_method = "ordinary_fallback"
 
     obs_or = float(np.exp(res.params['obs_z']))
     obs_p = float(res.pvalues['obs_z'])
@@ -120,17 +125,26 @@ def compute_jwst_validation_metrics(engine):
     triage_p = float(res.pvalues['triage_z'])
 
     conf = res.conf_int()
-    obs_ci = [round(float(np.exp(conf.loc['obs_z'][0])), 2), round(float(np.exp(conf.loc['obs_z'][1])), 2)]
-    triage_ci = [round(float(np.exp(conf.loc['triage_z'][0])), 2), round(float(np.exp(conf.loc['triage_z'][1])), 2)]
+    # Unrounded raw confidence intervals used for statistical equivalence testing
+    obs_ci_raw = [float(np.exp(conf.loc['obs_z'][0])), float(np.exp(conf.loc['obs_z'][1]))]
+    triage_ci_raw = [float(np.exp(conf.loc['triage_z'][0])), float(np.exp(conf.loc['triage_z'][1]))]
 
-    # Decision criteria:
+    # Decision criteria evaluated on UNROUNDED parameters:
     # 1. Observability power: OR >= 2.0 and p < 1e-4 (strong positive capture of operational observability)
     # 2. Historical Selection Independence (Equivalence Testing):
     #    Evaluates whether physical triage ranking is decoupled from historical operational transit bias.
     #    Equivalence bounds: OR in [0.70, 1.45] (symmetric interval on log-odds scale |beta| < 0.37).
-    #    Passed when both the point estimate and the 95% CI fall within the operational equivalence interval.
+    #    Passed when both the unrounded point estimate and unrounded 95% CI fall within [0.70, 1.45].
     obs_passed = bool(obs_or >= 2.0 and obs_p < 1e-4)
-    triage_passed = bool(0.70 <= triage_or <= 1.45 and triage_ci[0] >= 0.70 and triage_ci[1] <= 1.45)
+    triage_passed = bool(
+        0.70 <= triage_or <= 1.45
+        and triage_ci_raw[0] >= 0.70
+        and triage_ci_raw[1] <= 1.45
+    )
+
+    # Round only the display values
+    obs_ci = [round(obs_ci_raw[0], 2), round(obs_ci_raw[1], 2)]
+    triage_ci = [round(triage_ci_raw[0], 2), round(triage_ci_raw[1], 2)]
 
     return {
         "obs_or": round(obs_or, 2),
@@ -145,6 +159,7 @@ def compute_jwst_validation_metrics(engine):
         "passed": bool(obs_passed and triage_passed),
         "obs_passed": obs_passed,
         "triage_passed": triage_passed,
+        "inference_method": inference_method,
     }
 
 

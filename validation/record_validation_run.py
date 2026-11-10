@@ -44,14 +44,44 @@ def record_empirical_run():
     spearman_passed = bool(float(esi["spearman_rho"]) >= 0.80)
     sanity_all_passed = all(r.passed for r in sanity_results)
     jwst_passed = bool(jwst_metrics["passed"])
-    purity_passed = bool(0.70 <= jwst_metrics["triage_or"] <= 1.40)
+    purity_passed = bool(jwst_metrics["triage_passed"])
+
+    # Solar System Planet Controls: derive statuses before computing overall run status
+    earth_c = sanity_scores.get("Earth", {}).get("composite_score", 0.0)
+    mars_c = sanity_scores.get("Mars", {}).get("composite_score", 0.0)
+    venus_c = sanity_scores.get("Venus", {}).get("composite_score", 0.0)
+    jupiter_c = sanity_scores.get("Jupiter", {}).get("composite_score", 0.0)
+    # Strictly descending monotonic separation (Earth > Mars > Venus > Jupiter)
+    monotonic_passed = bool(earth_c > mars_c > venus_c > jupiter_c)
+
+    planet_statuses = {}
+    for name, s in sanity_scores.items():
+        comp_val = s.get("composite_score") or 0.0
+        sim_val = s.get("similarity_score") or 0.0
+        planet_assertions = [r for r in sanity_results if r.name.startswith(name)]
+        all_planet_assertions_passed = len(planet_assertions) > 0 and all(r.passed for r in planet_assertions)
+
+        planet_valid = all_planet_assertions_passed and monotonic_passed
+        if name == "Earth" and (comp_val < 0.75 or sim_val < 0.85):
+            planet_valid = False
+        elif name == "Venus" and comp_val >= 0.50:
+            planet_valid = False
+        elif name == "Mars" and sim_val >= 0.80:
+            planet_valid = False
+        elif name == "Jupiter" and comp_val >= 0.40:
+            planet_valid = False
+
+        planet_statuses[name] = "PASS" if planet_valid else "FAIL"
+
+    solar_controls_passed = bool(monotonic_passed and all(st == "PASS" for st in planet_statuses.values()))
 
     all_passed = (
         pearson_passed and
         spearman_passed and
         sanity_all_passed and
         jwst_passed and
-        purity_passed
+        purity_passed and
+        solar_controls_passed
     )
 
     sample_count = jwst_metrics["n_samples"]
@@ -149,33 +179,12 @@ def record_empirical_run():
             "status": "PASS" if r.passed else "FAIL"
         })
 
-    # Solar System Planet Controls (Dynamically evaluated individually)
-    earth_c = sanity_scores.get("Earth", {}).get("composite_score", 0.0)
-    mars_c = sanity_scores.get("Mars", {}).get("composite_score", 0.0)
-    venus_c = sanity_scores.get("Venus", {}).get("composite_score", 0.0)
-    jupiter_c = sanity_scores.get("Jupiter", {}).get("composite_score", 0.0)
-    monotonic_passed = (earth_c > mars_c > venus_c >= jupiter_c)
-
+    # Solar System Planet Controls (Insert evaluated statuses)
     for name, s in sanity_scores.items():
         comp_val = s.get("composite_score") or 0.0
         sim_val = s.get("similarity_score") or 0.0
         safe_val = s.get("safety_score") or 0.0
-        
-        # Derive planet status from individual assertions and physical criteria
-        planet_assertions = [r for r in sanity_results if r.name.startswith(name)]
-        all_planet_assertions_passed = len(planet_assertions) > 0 and all(r.passed for r in planet_assertions)
-        
-        planet_valid = all_planet_assertions_passed and monotonic_passed
-        if name == "Earth" and (comp_val < 0.75 or sim_val < 0.85):
-            planet_valid = False
-        elif name == "Venus" and comp_val >= 0.50:
-            planet_valid = False
-        elif name == "Mars" and sim_val >= 0.80:
-            planet_valid = False
-        elif name == "Jupiter" and comp_val >= 0.40:
-            planet_valid = False
-
-        status_str = "PASS" if planet_valid else "FAIL"
+        status_str = planet_statuses.get(name, "FAIL")
 
         session.execute(text("""
             INSERT INTO validation_results (
