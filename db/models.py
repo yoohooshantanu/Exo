@@ -354,6 +354,8 @@ class MoleculeDetection(Base):
     pub_reference = Column(Text)
     abiotic_ruled_out = Column(Boolean)
     method_notes = Column(Text)
+    detection_tier = Column(Text, index=True)
+    biosig_model_version = Column(Text, server_default="3.0.0")
     flagged_at = Column(DateTime(timezone=True), server_default=text("now()"))
     reviewed = Column(Boolean, server_default="false", index=True)
 

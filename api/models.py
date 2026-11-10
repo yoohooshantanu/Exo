@@ -179,6 +179,7 @@ class MoleculeDetectionItem(BaseModel):
     log_evidence: Optional[float] = None
     is_muted: Optional[bool] = None
     method_notes: Optional[str] = None
+    detection_tier: Optional[str] = None
 
 
 class SpectrumView(BaseModel):

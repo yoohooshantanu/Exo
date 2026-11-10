@@ -5,7 +5,7 @@ Two-track habitability scoring — scientifically defensible architecture.
 
 Track 1: similarity_score  (Earth Similarity Index — geometric mean)
   Variables: radius, bulk density, escape velocity, surface temperature
-  Methodology: Schulze-Makuch et al. 2011, matches UPR HEC
+  Methodology: ESI-inspired geometric formulation (Schulze-Makuch et al. 2011) using catalog equilibrium temperature and bulk density proxies
   Validates against UPR — target r >= 0.70
   What it answers: "How Earth-like is this planet physically?"
 
@@ -18,7 +18,7 @@ composite_score = 0.70 * similarity_score + 0.30 * safety_score
   Weighting: similarity is the primary filter, risk adjusts within it.
   This is the full habitability assessment — more complete than ESI alone.
 
-Model version: 4.2.0
+Model version: 5.0.0
 """
 
 import os, sys, math, uuid, json

@@ -380,7 +380,7 @@ async def get_planet(request: Request, planet_name: str, session: AsyncSession =
     hab_raw = d.get("composite_score") or 0.0
     hab_component = round(hab_raw * 40, 2)
 
-    confirmed_mols = [r for r in b_rows if (r.get("detection_sigma") or 0) >= 3.0]
+    confirmed_mols = [r for r in b_rows if (r.get("detection_sigma") or 0) >= 3.0 and (r.get("hitran_match_count") or 0) >= 3]
     n_mols = len(confirmed_mols)
     if n_mols > 0:
         avg_sigma = sum(r.get("detection_sigma", 3.0) for r in confirmed_mols) / n_mols

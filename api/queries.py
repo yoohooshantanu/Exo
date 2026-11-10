@@ -218,10 +218,16 @@ ORDER BY af.deviation_sigma DESC
 
 PLANET_BIOSIGS = text("""
 SELECT md.molecule, md.detection_sigma, md.wavelength_um, md.hitran_match_count,
-       md.abiotic_ruled_out, md.instrument, md.facility
+       md.abiotic_ruled_out, md.instrument, md.facility,
+       COALESCE(md.detection_tier, 
+           CASE WHEN md.detection_sigma >= 3.0 AND COALESCE(md.hitran_match_count, 0) >= 3 THEN 'screening_candidate'
+                WHEN md.detection_sigma >= 2.0 AND COALESCE(md.hitran_match_count, 0) >= 2 THEN 'marginal'
+                ELSE 'rejected' END) AS detection_tier
 FROM molecule_detections md
 JOIN planets p ON md.planet_id = p.planet_id
 WHERE p.planet_name = :planet_name
+  AND (md.detection_tier IN ('screening_candidate', 'marginal')
+       OR (md.detection_tier IS NULL AND md.detection_sigma >= 2.0 AND COALESCE(md.hitran_match_count, 0) >= 2))
 ORDER BY md.detection_sigma DESC
 """)
 
@@ -357,14 +363,25 @@ SELECT
     'Novel Taxonomy' AS category,
     tc.cluster_name AS detail
 FROM (
-    SELECT DISTINCT ON (planet_id) planet_id, cluster_name
-    FROM taxonomy_clusters
-    WHERE cluster_label = -1 OR cluster_name NOT IN (
-        'Hot Giant', 'Warm Giant', 'Cold Giant',
-        'Hot Sub-Neptune', 'Warm Sub-Neptune',
-        'Hot Rocky', 'Temperate Rocky', 'Neptune-class'
+    WITH latest_tax AS (
+        SELECT DISTINCT ON (planet_id) planet_id, cluster_label, cluster_name
+        FROM taxonomy_clusters
+        ORDER BY planet_id, run_at DESC, cluster_label DESC
     )
-    ORDER BY planet_id, run_at DESC
+    SELECT planet_id, cluster_name
+    FROM latest_tax
+    WHERE cluster_label >= 0
+      AND NOT (
+          LOWER(cluster_name) LIKE '%giant%'
+          OR LOWER(cluster_name) LIKE '%neptune%'
+          OR LOWER(cluster_name) LIKE '%rocky%'
+          OR LOWER(cluster_name) LIKE '%earth%'
+          OR LOWER(cluster_name) LIKE '%jupiter%'
+          OR LOWER(cluster_name) LIKE '%saturn%'
+          OR LOWER(cluster_name) LIKE '%water world%'
+          OR LOWER(cluster_name) LIKE '%ocean%'
+          OR LOWER(cluster_name) LIKE '%terrestrial%'
+      )
 ) tc
 JOIN planets p ON tc.planet_id = p.planet_id
 JOIN stars s ON p.star_id = s.star_id
@@ -383,15 +400,19 @@ SELECT
     mvs.observability_index,
     mvs.physical_triage_index,
     mvs.characterization_index,
-    'Screening Candidate' AS category,
+    CASE 
+        WHEN COALESCE(md.detection_tier, '') = 'screening_candidate' 
+             OR (md.detection_sigma >= 3.0 AND COALESCE(md.hitran_match_count, 0) >= 3) THEN 'Screening Candidate'
+        ELSE 'Marginal Detection'
+    END AS category,
     md.molecule AS detail
 FROM molecule_detections md
 JOIN planets p ON md.planet_id = p.planet_id
 JOIN stars s ON p.star_id = s.star_id
 LEFT JOIN mv_discovery_scores mvs ON mvs.planet_id = p.planet_id
-WHERE md.detection_sigma >= 2.0
-  AND COALESCE(md.hitran_match_count, 0) >= 2
-GROUP BY p.planet_id, mvs.discovery_score, mvs.observability_index, mvs.physical_triage_index, mvs.characterization_index, p.planet_name, s.hip_name, s.star_id, md.molecule
+WHERE (md.detection_tier IN ('screening_candidate', 'marginal')
+       OR (md.detection_tier IS NULL AND md.detection_sigma >= 2.0 AND COALESCE(md.hitran_match_count, 0) >= 2))
+GROUP BY p.planet_id, mvs.discovery_score, mvs.observability_index, mvs.physical_triage_index, mvs.characterization_index, p.planet_name, s.hip_name, s.star_id, md.molecule, md.detection_tier, md.detection_sigma, md.hitran_match_count
 ORDER BY mvs.characterization_index DESC NULLS LAST, MAX(md.detection_sigma) DESC
 LIMIT :limit
 """)

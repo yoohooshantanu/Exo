@@ -531,6 +531,17 @@ def upsert_detections(session, detections):
         """), {"pid": det["planet_id"], "sid": det["spec_id"],
                "mol": det["molecule"]}).fetchone()
 
+        tier_val = det.get("tier")
+        if not tier_val:
+            s_val = float(det["detection_sigma"])
+            p_val = int(det.get("hitran_match_count") or 0)
+            if s_val >= CONFIRMED_SIGMA and p_val >= 3:
+                tier_val = "screening_candidate"
+            elif s_val >= marginal_sigma and p_val >= 2:
+                tier_val = "marginal"
+            else:
+                tier_val = "rejected"
+
         params = {
             "pid": det["planet_id"], "sid": det["spec_id"],
             "mol": det["molecule"], "sigma": float(det["detection_sigma"]),
@@ -541,6 +552,7 @@ def upsert_detections(session, detections):
             "fac": det.get("facility"), "ref": det.get("pub_reference"),
             "abiotic": det.get("abiotic_ruled_out"),
             "notes": det.get("method_notes"), "reviewed": det.get("reviewed", False),
+            "tier": tier_val, "model_ver": "3.0.0",
         }
 
         if existing:
@@ -550,7 +562,8 @@ def upsert_detections(session, detections):
                     detection_sigma=:sigma, wavelength_um=:wl,
                     hitran_match_count=:hmc, depth_excess_ppm=:excess,
                     abiotic_ruled_out=:abiotic, method_notes=:notes,
-                    reviewed=:reviewed, flagged_at=now()
+                    reviewed=:reviewed, detection_tier=:tier,
+                    biosig_model_version=:model_ver, flagged_at=now()
                 WHERE detection_id=:did
             """), params)
         else:
@@ -560,9 +573,11 @@ def upsert_detections(session, detections):
                     (detection_id, planet_id, spec_id, molecule, detection_sigma,
                      wavelength_um, hitran_match_count, depth_excess_ppm,
                      instrument, facility, pub_reference,
-                     abiotic_ruled_out, method_notes, reviewed)
+                     abiotic_ruled_out, method_notes, reviewed,
+                     detection_tier, biosig_model_version)
                 VALUES (:did, :pid, :sid, :mol, :sigma, :wl, :hmc, :excess,
-                        :inst, :fac, :ref, :abiotic, :notes, :reviewed)
+                        :inst, :fac, :ref, :abiotic, :notes, :reviewed,
+                        :tier, :model_ver)
             """), params)
         count += 1
 
@@ -919,10 +934,13 @@ def run(planet_name=None, threshold=None, dry_run=False, validate=False):
             # Classify all detections for this planet
             for det in planet_dets:
                 classify_detection(det, planet_dets, phys_params, host_spectral_type, marginal_sigma)
-                if det["detection_sigma"] >= CONFIRMED_SIGMA:
-                    tier_label = "[T1]"
+                t_curr = det.get("tier")
+                if t_curr == "screening_candidate":
+                    tier_label = "[Candidate]"
+                elif t_curr == "marginal":
+                    tier_label = "[Marginal]"
                 else:
-                    tier_label = "[T2]"
+                    tier_label = "[Rejected]"
 
                 print(f"  {tier_label} {MOL_NAMES[det['molecule']]}  "
                       f"sigma={det['detection_sigma']:.1f}  "
