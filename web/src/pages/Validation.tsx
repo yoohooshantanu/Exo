@@ -188,15 +188,30 @@ export default function Validation() {
   const track3 = tracks.find((t: any) => t.track?.includes('Independence') || t.track?.includes('Purity'))
   const track4 = tracks.find((t: any) => t.track?.includes('Solar System'))
 
-  const solarControls = data?.evaluation_run?.solar_system_controls ?? SOLAR_SYSTEM_CONTROLS
-  const allControlsPassed = solarControls.every((c: any) => c.status === 'PASS')
+  const solarControls = data?.evaluation_run?.solar_system_controls ?? []
+  const hasControls = solarControls.length > 0
+  const allControlsPassed = hasControls && solarControls.every((c: any) => c.status === 'PASS')
+
+  const pipelineStatus = data?.evaluation_run?.pipeline_status ?? "Not evaluated"
+  const isOnline = pipelineStatus === "Online & Calibrated"
+  const isFailed = pipelineStatus === "Failed"
+  const isNotEvaluated = pipelineStatus === "Not evaluated" 
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-16">
       {/* ── Page Header ─────────────────────────────────────────────── */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-800/80 pb-6">
         <div>
-          <div className="inline-flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/80 px-3 py-1 text-xs font-mono text-zinc-300 mb-2"><span className="size-1.5 rounded-full bg-emerald-400" /><span>Automated Pipeline Validation Suite &bull; Empirical Benchmarks Verified</span></div>
+          <div className="inline-flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/80 px-3 py-1 text-xs font-mono text-zinc-300 mb-2">
+            <span className={`size-1.5 rounded-full ${isOnline ? "bg-emerald-400" : isFailed ? "bg-red-400" : "bg-zinc-500"}`} />
+            <span>
+              {isOnline 
+                ? "Automated Pipeline Validation Suite • Empirical Benchmarks Verified" 
+                : isFailed 
+                ? "Automated Pipeline Validation Suite • Validation Failed" 
+                : "Automated Pipeline Validation Suite • Not Evaluated"}
+            </span>
+          </div>
           <h1 className="text-3xl font-medium tracking-tight text-white">
             Scientific Validation &amp; Allocation Study
           </h1>
@@ -224,12 +239,14 @@ export default function Validation() {
               <Scale className="size-4 text-zinc-400" />
             </div>
             <CardTitle className="text-2xl font-mono font-medium text-white mt-1">
-              {track1?.actual ? `r = ${track1.actual}` : "r = 0.772"}
+              {track1?.actual !== undefined && track1?.actual !== null ? `r = ${track1.actual}` : "Not evaluated"}
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0 px-5 pb-4">
             <p className="text-xs text-zinc-400">
-              Pearson correlation against published ESI (threshold ≥ 0.70). Spearman ρ = {track1?.spearman ?? "0.806"}.
+              {track1?.spearman !== undefined && track1?.spearman !== null
+                ? `Pearson correlation against published ESI (threshold ≥ 0.70). Spearman ρ = ${track1.spearman}.`
+                : "Pearson correlation against published ESI (threshold ≥ 0.70). Awaiting evaluation run."}
             </p>
           </CardContent>
         </Card>
@@ -241,12 +258,14 @@ export default function Validation() {
               <Telescope className="size-4 text-zinc-400" />
             </div>
             <CardTitle className="text-2xl font-mono font-medium text-white mt-1">
-              {track2?.actual ? `OR = ${track2.actual}` : "OR = 2.69"}
+              {track2?.actual !== undefined && track2?.actual !== null ? `OR = ${track2.actual}` : "Not evaluated"}
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0 px-5 pb-4">
             <p className="text-xs text-zinc-400">
-              Logistic regression odds ratio predicting JWST target selection (p = {track2?.p_value ?? "5.0e-80"}).
+              {track2?.p_value && track2?.p_value !== "N/A"
+                ? `Logistic regression odds ratio predicting JWST target selection (p = ${track2.p_value}).`
+                : "Logistic regression odds ratio predicting JWST target selection."}
             </p>
           </CardContent>
         </Card>
@@ -258,12 +277,14 @@ export default function Validation() {
               <ShieldCheck className="size-4 text-zinc-400" />
             </div>
             <CardTitle className="text-2xl font-mono font-medium text-white mt-1">
-              {track3?.actual ? `OR = ${track3.actual}` : "OR = 1.22"}
+              {track3?.actual !== undefined && track3?.actual !== null ? `OR = ${track3.actual}` : "Not evaluated"}
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0 px-5 pb-4">
             <p className="text-xs text-zinc-400">
-              Target selection orthogonality (Cycle 1–3 allocations independent of physical triage rank).
+              {track3?.ci
+                ? `Target selection orthogonality (95% CI: [${track3.ci[0]}, ${track3.ci[1]}] within equivalence bounds [0.70, 1.45]).`
+                : "Target selection orthogonality (Cycle 1–3 allocations independent of physical triage rank)."}
             </p>
           </CardContent>
         </Card>
@@ -275,12 +296,18 @@ export default function Validation() {
               <CheckCircle2 className="size-4 text-zinc-400" />
             </div>
             <CardTitle className="text-2xl font-mono font-medium text-white mt-1">
-              {allControlsPassed ? "100% Pass" : "Calibration Failed"}
+              {isNotEvaluated || !hasControls
+                ? "Not evaluated"
+                : allControlsPassed
+                ? "100% Pass"
+                : "Calibration Failed"}
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0 px-5 pb-4">
             <p className="text-xs text-zinc-400">
-              Earth, Mars, Venus, and Jupiter independently verified across physical boundaries.
+              {hasControls 
+                ? "Earth, Mars, Venus, and Jupiter independently verified across physical boundaries."
+                : "Four Solar System control baselines awaiting evaluation execution."}
             </p>
           </CardContent>
         </Card>
@@ -298,8 +325,14 @@ export default function Validation() {
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className="size-2 rounded-full bg-emerald-400" />
-          <span className="text-emerald-400 font-medium">Pipeline Verified &bull; Ground-Truth Calibrated</span>
+          <span className={`size-2 rounded-full ${isOnline ? "bg-emerald-400" : isFailed ? "bg-red-400" : "bg-zinc-500"}`} />
+          <span className={`font-medium ${isOnline ? "text-emerald-400" : isFailed ? "text-red-400" : "text-zinc-400"}`}>
+            {isOnline 
+              ? "Pipeline Verified • Ground-Truth Calibrated" 
+              : isFailed 
+              ? "Pipeline Verification Failed" 
+              : "Pipeline Not Evaluated"}
+          </span>
         </div>
       </div>
 
@@ -363,7 +396,7 @@ export default function Validation() {
                     </BarChart>
                   </ChartContainer>
                   <p className="text-[11px] text-zinc-400 mt-2 font-mono text-center">
-                    88.0% of all JWST Cycle 1–3 spectroscopic time was allocated to Top 40% Observability targets.
+                    88% of the listed JWST targets (44 of 50) fall within the top 40% of observability scores.
                   </p>
                 </div>
 
@@ -522,16 +555,25 @@ export default function Validation() {
             <CardHeader className="pb-3 border-b border-zinc-800/60">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-sm font-medium text-white">
-                    External Published Reference Benchmarks: UPR ESI Catalog Baseline
-                  </CardTitle>
+                  <div className="flex items-center gap-2">
+                    <CardTitle className="text-sm font-medium text-white">
+                      External Published Reference Benchmarks: UPR ESI Catalog Baseline
+                    </CardTitle>
+                    <Badge variant="outline" className="text-[10px] font-mono border-zinc-800 text-zinc-400">
+                      Historical Benchmark Snapshot (v5.0)
+                    </Badge>
+                  </div>
                   <CardDescription className="text-xs text-zinc-400 mt-1">
                     Cross-validation against 20 benchmark exoplanets from the Planetary Habitability Laboratory (PHL) at UPR Arecibo.
-                    Achieves <strong>Pearson r = {track1?.actual ?? "0.772"}</strong> and <strong>Spearman &rho; = {track1?.spearman ?? "0.806"}</strong>.
+                    {track1?.actual !== undefined && track1?.actual !== null
+                      ? ` Achieves Pearson r = ${track1.actual} and Spearman ρ = ${track1.spearman}.`
+                      : " Awaiting evaluation run."}
                   </CardDescription>
                 </div>
                 <div className="text-right font-mono">
-                  <span className="text-sm text-zinc-100 font-mono font-medium">r = {track1?.actual ?? "0.772"}</span>
+                  <span className="text-sm text-zinc-100 font-mono font-medium">
+                    {track1?.actual !== undefined && track1?.actual !== null ? `r = ${track1.actual}` : "N/A"}
+                  </span>
                   <p className="text-[10px] text-zinc-400 uppercase">Target: r &ge; 0.70</p>
                 </div>
               </div>

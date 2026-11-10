@@ -446,6 +446,10 @@ class ValidationResult(Base):
     expected_value = Column(Float)
     actual_value = Column(Float)
     tolerance = Column(Float)
+    ci_lower = Column(Float)
+    ci_upper = Column(Float)
+    p_value = Column(Float)
+    inference_method = Column(Text)
     sample_count = Column(Integer)
     status = Column(Text, server_default="PASS")
 

@@ -134,32 +134,44 @@ def record_empirical_run():
         "status": "PASS" if spearman_passed else "FAIL"
     })
 
-    # Track 2: Geometric Observability Power
+    # Track 2: Geometric Observability Power (with persisted CIs and inference method)
     session.execute(text("""
         INSERT INTO validation_results (
-            run_id, benchmark_name, metric_name, expected_value, actual_value, tolerance, sample_count, status
+            run_id, benchmark_name, metric_name, expected_value, actual_value, tolerance,
+            ci_lower, ci_upper, p_value, inference_method, sample_count, status
         ) VALUES (
-            :run_id, 'Geometric Observability Power', 'Odds Ratio', 2.00, :actual, :tol, :samples, :status
+            :run_id, 'Geometric Observability Power', 'Odds Ratio', 2.00, :actual, :tol,
+            :ci_lower, :ci_upper, :p_val, :inf_method, :samples, :status
         )
     """), {
         "run_id": run_id,
         "actual": float(jwst_metrics["obs_or"]),
         "tol": float(jwst_metrics["obs_p_val"]),
+        "ci_lower": float(jwst_metrics["obs_ci"][0]) if jwst_metrics.get("obs_ci") else None,
+        "ci_upper": float(jwst_metrics["obs_ci"][1]) if jwst_metrics.get("obs_ci") else None,
+        "p_val": float(jwst_metrics["obs_p_val"]),
+        "inf_method": jwst_metrics.get("inference_method", "cluster_robust"),
         "samples": int(jwst_metrics["n_samples"]),
         "status": "PASS" if jwst_passed else "FAIL"
     })
 
-    # Track 3: Historical JWST Selection Independence Analysis
+    # Track 3: Historical JWST Selection Independence Analysis (with persisted CIs and inference method)
     session.execute(text("""
         INSERT INTO validation_results (
-            run_id, benchmark_name, metric_name, expected_value, actual_value, tolerance, sample_count, status
+            run_id, benchmark_name, metric_name, expected_value, actual_value, tolerance,
+            ci_lower, ci_upper, p_value, inference_method, sample_count, status
         ) VALUES (
-            :run_id, 'Historical JWST Selection Independence Analysis', 'Triage Odds Ratio', 1.00, :actual, :tol, :samples, :status
+            :run_id, 'Historical JWST Selection Independence Analysis', 'Triage Odds Ratio', 1.00, :actual, :tol,
+            :ci_lower, :ci_upper, :p_val, :inf_method, :samples, :status
         )
     """), {
         "run_id": run_id,
         "actual": float(jwst_metrics["triage_or"]),
         "tol": float(jwst_metrics["triage_p_val"]),
+        "ci_lower": float(jwst_metrics["triage_ci"][0]) if jwst_metrics.get("triage_ci") else None,
+        "ci_upper": float(jwst_metrics["triage_ci"][1]) if jwst_metrics.get("triage_ci") else None,
+        "p_val": float(jwst_metrics["triage_p_val"]),
+        "inf_method": jwst_metrics.get("inference_method", "cluster_robust"),
         "samples": int(jwst_metrics["n_samples"]),
         "status": "PASS" if purity_passed else "FAIL"
     })

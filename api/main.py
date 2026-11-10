@@ -926,7 +926,8 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
 
     if val_run:
         val_results = (await session.execute(text("""
-            SELECT benchmark_name, metric_name, expected_value, actual_value, tolerance, sample_count, status
+            SELECT benchmark_name, metric_name, expected_value, actual_value, tolerance,
+                   ci_lower, ci_upper, p_value, inference_method, sample_count, status
             FROM validation_results
             WHERE run_id = :rid
         """), {"rid": val_run["run_id"]})).mappings().all()
@@ -986,22 +987,30 @@ async def get_validation_metrics(session: AsyncSession = Depends(get_db)):
             })
         if obs_row:
             obs_val = obs_row["actual_value"]
-            obs_p = f"{obs_row['tolerance']:.2e}" if obs_row.get('tolerance') is not None else "N/A"
+            obs_p_val = obs_row.get("p_value") if obs_row.get("p_value") is not None else obs_row.get("tolerance")
+            obs_p = f"{obs_p_val:.2e}" if obs_p_val is not None else "N/A"
+            obs_ci = [obs_row["ci_lower"], obs_row["ci_upper"]] if obs_row.get("ci_lower") is not None and obs_row.get("ci_upper") is not None else None
             tracks.append({
                 "track": "Geometric Observability Power",
                 "target": "Odds Ratio >= 2.0 (p < 1e-4)",
                 "actual": round(obs_val, 2) if obs_val is not None else "N/A",
                 "p_value": obs_p,
+                "ci": obs_ci,
+                "inference_method": obs_row.get("inference_method"),
                 "status": obs_row["status"],
             })
         if triage_row:
             triage_val = triage_row["actual_value"]
-            triage_p = f"{triage_row['tolerance']:.2e}" if triage_row.get('tolerance') is not None else "N/A"
+            triage_p_val = triage_row.get("p_value") if triage_row.get("p_value") is not None else triage_row.get("tolerance")
+            triage_p = f"{triage_p_val:.2e}" if triage_p_val is not None else "N/A"
+            triage_ci = [triage_row["ci_lower"], triage_row["ci_upper"]] if triage_row.get("ci_lower") is not None and triage_row.get("ci_upper") is not None else None
             tracks.append({
                 "track": "Historical JWST Selection Independence Analysis",
-                "target": "Selection orthogonality (OR ~ 1.0, CI includes 1.0)",
+                "target": "Selection orthogonality (OR ~ 1.0, CI inside [0.70, 1.45])",
                 "actual": round(triage_val, 2) if triage_val is not None else "N/A",
                 "p_value": triage_p,
+                "ci": triage_ci,
+                "inference_method": triage_row.get("inference_method"),
                 "status": triage_row["status"],
             })
         if track4_actual:

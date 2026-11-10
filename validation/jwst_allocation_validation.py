@@ -90,12 +90,16 @@ def compute_jwst_validation_metrics(engine):
             "obs_p": "1.00e+00",
             "obs_p_val": 1.0,
             "obs_ci": [1.0, 1.0],
+            "obs_ci_raw": [1.0, 1.0],
             "triage_or": 1.0,
             "triage_p": "1.00e+00",
             "triage_p_val": 1.0,
             "triage_ci": [1.0, 1.0],
+            "triage_ci_raw": [1.0, 1.0],
             "n_samples": n_samples,
             "passed": False,
+            "obs_passed": False,
+            "triage_passed": False,
             "inference_method": "insufficient_data",
         }
 

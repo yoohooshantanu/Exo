@@ -479,3 +479,168 @@ class TestValidationIntegrityEndpoints:
         assert controls["Earth"]["status"] != "PASS"
 
         app.dependency_overrides.clear()
+
+    def test_jwst_insufficient_data_handled_gracefully(self):
+        """Verify that insufficient JWST data does not cause KeyError in record_empirical_run."""
+        from validation.jwst_allocation_validation import compute_jwst_validation_metrics
+        from unittest.mock import MagicMock
+        import pandas as pd
+
+        # Mock engine returning an empty dataframe (insufficient samples)
+        mock_engine = MagicMock()
+        with patch("pandas.read_sql") as mock_read_sql:
+            mock_read_sql.return_value = pd.DataFrame(columns=[
+                "planet_name", "star_id", "discovery_year", "physical_triage_index", "observability_index"
+            ])
+            metrics = compute_jwst_validation_metrics(mock_engine)
+
+            assert "obs_passed" in metrics
+            assert "triage_passed" in metrics
+            assert metrics["obs_passed"] is False
+            assert metrics["triage_passed"] is False
+            assert metrics["passed"] is False
+            assert metrics["inference_method"] == "insufficient_data"
+
+    def test_validation_metrics_returns_ci_and_inference_method(self):
+        """Verify that /api/validation/metrics exposes ci and inference_method for statistical tracks."""
+        from api.main import app
+        from api.db import get_db
+
+        session = AsyncMock()
+
+        val_run_mock = MagicMock()
+        val_run_mock.mappings.return_value.one_or_none.return_value = {
+            "run_id": "mock-run-uuid-2",
+            "engine_version": "5.0.0",
+            "orbital_version": "3.1.0",
+            "biosig_version": "3.0.0",
+            "dataset_version": "UPR + NASA",
+            "started_at": None,
+            "completed_at": None,
+            "total_samples": 5587,
+            "status": "completed",
+        }
+
+        val_res_mock = MagicMock()
+        val_res_mock.mappings.return_value.all.return_value = [
+            {
+                "benchmark_name": "UPR ESI Benchmark Correlation",
+                "metric_name": "Pearson r",
+                "expected_value": 0.70,
+                "actual_value": 0.772,
+                "tolerance": 0.0,
+                "ci_lower": None, "ci_upper": None, "p_value": None, "inference_method": None,
+                "sample_count": 20,
+                "status": "PASS",
+            },
+            {
+                "benchmark_name": "UPR ESI Benchmark Rank Order",
+                "metric_name": "Spearman rho",
+                "expected_value": 0.80,
+                "actual_value": 0.806,
+                "tolerance": 0.0,
+                "ci_lower": None, "ci_upper": None, "p_value": None, "inference_method": None,
+                "sample_count": 20,
+                "status": "PASS",
+            },
+            {
+                "benchmark_name": "Geometric Observability Power",
+                "metric_name": "Odds Ratio",
+                "expected_value": 2.00,
+                "actual_value": 2.69,
+                "tolerance": 5.04e-80,
+                "ci_lower": 2.43, "ci_upper": 2.98, "p_value": 5.04e-80,
+                "inference_method": "cluster_robust",
+                "sample_count": 5587,
+                "status": "PASS",
+            },
+            {
+                "benchmark_name": "Historical JWST Selection Independence Analysis",
+                "metric_name": "Triage Odds Ratio",
+                "expected_value": 1.00,
+                "actual_value": 1.22,
+                "tolerance": 9.32e-03,
+                "ci_lower": 1.05, "ci_upper": 1.41, "p_value": 9.32e-03,
+                "inference_method": "cluster_robust",
+                "sample_count": 5587,
+                "status": "PASS",
+            },
+            {
+                "benchmark_name": "Solar System Sanity Control",
+                "metric_name": "Earth Composite Score",
+                "expected_value": 1.0, "actual_value": 0.868, "tolerance": 0.868,
+                "ci_lower": None, "ci_upper": None, "p_value": None, "inference_method": None,
+                "sample_count": 1, "status": "PASS",
+            },
+            {
+                "benchmark_name": "Solar System Sanity Control",
+                "metric_name": "Mars Composite Score",
+                "expected_value": 0.721, "actual_value": 0.745, "tolerance": 0.505,
+                "ci_lower": None, "ci_upper": None, "p_value": None, "inference_method": None,
+                "sample_count": 1, "status": "PASS",
+            },
+            {
+                "benchmark_name": "Solar System Sanity Control",
+                "metric_name": "Venus Composite Score",
+                "expected_value": 0.39, "actual_value": 0.406, "tolerance": 0.0,
+                "ci_lower": None, "ci_upper": None, "p_value": None, "inference_method": None,
+                "sample_count": 1, "status": "PASS",
+            },
+            {
+                "benchmark_name": "Solar System Sanity Control",
+                "metric_name": "Jupiter Composite Score",
+                "expected_value": 0.239, "actual_value": 0.0, "tolerance": 0.0,
+                "ci_lower": None, "ci_upper": None, "p_value": None, "inference_method": None,
+                "sample_count": 1, "status": "PASS",
+            },
+        ]
+
+        from datetime import datetime, timezone
+        generic_scalar = MagicMock()
+        generic_scalar.scalar.return_value = 100
+        dt_scalar = MagicMock()
+        dt_scalar.scalar.return_value = datetime.now(timezone.utc)
+        generic_fetchall = MagicMock()
+        generic_fetchall.fetchall.return_value = []
+        generic_fetchone = MagicMock()
+        generic_fetchone.fetchone.return_value = None
+
+        def side_effect_fn(*args, **kwargs):
+            query_str = str(args[0]) if args else ""
+            if "FROM validation_runs" in query_str:
+                return val_run_mock
+            elif "FROM validation_results" in query_str:
+                return val_res_mock
+            elif "SELECT MAX(" in query_str:
+                return dt_scalar
+            elif "SELECT COUNT(*)" in query_str:
+                return generic_scalar
+            elif "GROUP BY" in query_str:
+                return generic_fetchall
+            else:
+                return generic_fetchone
+
+        session.execute.side_effect = side_effect_fn
+        session.close = AsyncMock()
+
+        async def override_get_db():
+            yield session
+
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+
+        response = client.get("/api/validation/metrics")
+        assert response.status_code == 200
+        data = response.json()
+        eval_run = data["evaluation_run"]
+        tracks = {t["track"]: t for t in eval_run["tracks"]}
+
+        # Check Track 2
+        assert tracks["Geometric Observability Power"]["ci"] == [2.43, 2.98]
+        assert tracks["Geometric Observability Power"]["inference_method"] == "cluster_robust"
+
+        # Check Track 3
+        assert tracks["Historical JWST Selection Independence Analysis"]["ci"] == [1.05, 1.41]
+        assert tracks["Historical JWST Selection Independence Analysis"]["inference_method"] == "cluster_robust"
+
+        app.dependency_overrides.clear()
