@@ -180,6 +180,7 @@ class MoleculeDetectionItem(BaseModel):
     is_muted: Optional[bool] = None
     method_notes: Optional[str] = None
     detection_tier: Optional[str] = None
+    biosig_model_version: Optional[str] = None
 
 
 class SpectrumView(BaseModel):

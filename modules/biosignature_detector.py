@@ -537,7 +537,7 @@ def upsert_detections(session, detections):
             p_val = int(det.get("hitran_match_count") or 0)
             if s_val >= CONFIRMED_SIGMA and p_val >= 3:
                 tier_val = "screening_candidate"
-            elif s_val >= marginal_sigma and p_val >= 2:
+            elif s_val >= MARGINAL_SIGMA and p_val >= 2:
                 tier_val = "marginal"
             else:
                 tier_val = "rejected"
@@ -552,7 +552,7 @@ def upsert_detections(session, detections):
             "fac": det.get("facility"), "ref": det.get("pub_reference"),
             "abiotic": det.get("abiotic_ruled_out"),
             "notes": det.get("method_notes"), "reviewed": det.get("reviewed", False),
-            "tier": tier_val, "model_ver": "3.0.0",
+            "tier": tier_val, "model_ver": MODEL_VERSION,
         }
 
         if existing:
@@ -863,9 +863,9 @@ def run(planet_name=None, threshold=None, dry_run=False, validate=False):
     marginal_sigma = threshold if threshold is not None else MARGINAL_SIGMA
 
     print(f"\nBiosignature Detector v{MODEL_VERSION}")
-    print(f"  Tier 1 threshold: >={CONFIRMED_SIGMA} sigma (confirmed)")
-    print(f"  Tier 2 threshold: >={marginal_sigma} sigma (marginal/watchlist)")
-    print(f"  Min HITRAN lines: {MIN_HITRAN_MATCH}")
+    print(f"  Tier 1 threshold: >={CONFIRMED_SIGMA} sigma (statistically significant screening candidate)")
+    print(f"  Tier 2 threshold: >={marginal_sigma} sigma (marginal match)")
+    print(f"  Min template feature peaks: {MIN_TEMPLATE_FEATURE_PEAKS}")
     if planet_name:
         print(f"  Filter: {planet_name}")
     print(f"  Dry run: {dry_run}")

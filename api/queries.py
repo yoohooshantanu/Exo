@@ -297,11 +297,18 @@ ORDER BY wavelength_um
 """)
 
 SPECTRUM_DETECTIONS = text("""
-SELECT molecule, detection_sigma, wavelength_um, hitran_match_count,
-       abiotic_ruled_out, instrument, facility, method_notes
+SELECT md.molecule, md.detection_sigma, md.wavelength_um, md.hitran_match_count,
+       md.abiotic_ruled_out, md.instrument, md.facility, md.method_notes,
+       COALESCE(md.detection_tier,
+           CASE WHEN md.detection_sigma >= 3.0 AND COALESCE(md.hitran_match_count, 0) >= 3 THEN 'screening_candidate'
+                WHEN md.detection_sigma >= 2.0 AND COALESCE(md.hitran_match_count, 0) >= 2 THEN 'marginal'
+                ELSE 'rejected' END) AS detection_tier,
+       COALESCE(md.biosig_model_version, '3.0.0') AS biosig_model_version
 FROM molecule_detections md
 JOIN planets p ON md.planet_id = p.planet_id
 WHERE p.planet_name = :planet_name
+  AND (md.detection_tier IN ('screening_candidate', 'marginal')
+       OR (md.detection_tier IS NULL AND md.detection_sigma >= 2.0 AND COALESCE(md.hitran_match_count, 0) >= 2))
 ORDER BY md.detection_sigma DESC
 """)
 
@@ -510,8 +517,9 @@ UNION ALL
     JOIN molecule_detections md ON md.planet_id = p2.planet_id
     LEFT JOIN habitability_scores hs
         ON hs.planet_id = p2.planet_id AND hs.model_version = :score_version
-    WHERE md.detection_sigma >= 2.0
-      AND COALESCE(md.hitran_match_count, 0) >= 2
+    WHERE (md.detection_tier IN ('screening_candidate', 'marginal')
+           OR (md.detection_tier IS NULL AND md.detection_sigma >= 2.0 AND COALESCE(md.hitran_match_count, 0) >= 2))
+      AND COALESCE(md.biosig_model_version, :biosig_version) = :biosig_version
       AND op.model_version = :pred_version
 )
 ORDER BY created_at DESC
@@ -552,6 +560,8 @@ SELECT
         SELECT 1 FROM molecule_detections md
         JOIN planets p2 ON md.planet_id = p2.planet_id
         WHERE p2.star_id = s.star_id
+          AND (md.detection_tier IN ('screening_candidate', 'marginal')
+               OR (md.detection_tier IS NULL AND md.detection_sigma >= 2.0 AND COALESCE(md.hitran_match_count, 0) >= 2))
     ) AS has_biosig
 FROM stars s
 LEFT JOIN star_parameters sp
@@ -584,9 +594,15 @@ SELECT
     MAX(CASE WHEN pp.param_name = 'radius_earth' THEN pp.value END) AS radius_earth,
     MAX(CASE WHEN pp.param_name = 'mass_earth' THEN pp.value END) AS mass_earth,
     MAX(CASE WHEN pp.param_name = 'eq_temperature_k' THEN pp.value END) AS eq_temperature_k,
-    (SELECT COUNT(*) FROM molecule_detections md WHERE md.planet_id = p.planet_id) AS biosig_count,
+    (SELECT COUNT(*) FROM molecule_detections md
+     WHERE md.planet_id = p.planet_id
+       AND (md.detection_tier IN ('screening_candidate', 'marginal')
+            OR (md.detection_tier IS NULL AND md.detection_sigma >= 2.0 AND COALESCE(md.hitran_match_count, 0) >= 2))) AS biosig_count,
     (SELECT string_agg(DISTINCT md.molecule, ', ')
-     FROM molecule_detections md WHERE md.planet_id = p.planet_id) AS molecules_detected,
+     FROM molecule_detections md
+     WHERE md.planet_id = p.planet_id
+       AND (md.detection_tier IN ('screening_candidate', 'marginal')
+            OR (md.detection_tier IS NULL AND md.detection_sigma >= 2.0 AND COALESCE(md.hitran_match_count, 0) >= 2))) AS molecules_detected,
     (SELECT COUNT(*) FROM anomaly_flags af WHERE af.planet_id = p.planet_id) AS anomaly_count
 FROM habitability_scores hs
 JOIN planets p ON hs.planet_id = p.planet_id
