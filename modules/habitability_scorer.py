@@ -21,7 +21,7 @@ composite_score = 0.70 * similarity_score + 0.30 * safety_score
 Model version: 5.0.0
 """
 
-import os, sys, math, uuid, json
+import os, sys, math, uuid, json, hashlib
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -102,8 +102,11 @@ def p_rocky(radius_earth, mass_earth=None) -> float:
     """
     Physical Terrestrial Surface Gate P_rocky(R_p, M_p).
     Grounding: Fulton et al. (2017) radius valley, Rogers (2015), Zeng et al. (2019).
-    Planets with Rp > 1.8 R_earth or low bulk density are gaseous sub-Neptunes
-    incapable of hosting a solid/liquid surface.
+    Continuous logistic transition bounded to max 0.95 (Earth baseline).
+    When bulk density rho is measured:
+      - Dense rocky planets (rho >= 0.8 Earth) shift the transition midpoint out to ~1.85 R_earth.
+      - Low-density gas-enveloped planets (rho < 0.5) shift midpoint down to ~1.50 R_earth.
+    Avoids step discontinuities at boundary thresholds.
     """
     r = nv(radius_earth)
     m = nv(mass_earth)
@@ -112,20 +115,19 @@ def p_rocky(radius_earth, mass_earth=None) -> float:
     if r is None or r <= 0:
         return 0.0
     
-    # If density is measured and planet has mass
+    midpoint = 1.80
+    width = 0.12
     if m is not None and m > 0 and r > 0:
         rho = m / (r ** 3)
-        if rho >= 0.8 and r <= 1.8:
-            return 0.95
-        if rho < 0.5:
-            # Low density gas envelope
-            z = max(-50.0, min(50.0, (r - 1.5) / 0.08))
-            return float(1.0 / (1.0 + math.exp(z)))
+        if rho >= 0.8:
+            midpoint = 1.95
+            width = 0.10
+        elif rho < 0.5:
+            midpoint = 1.50
+            width = 0.08
 
-    # Standard Fulton et al. 2017 radius valley logistic gate
-    # Midpoint at 1.80 R_earth, transition width 0.12
-    z = max(-50.0, min(50.0, (r - 1.80) / 0.12))
-    return float(1.0 / (1.0 + math.exp(z)))
+    z = max(-50.0, min(50.0, (r - midpoint) / width))
+    return float(round(1.0 / (1.0 + math.exp(z)), 4))
 
 
 def score_flare(teff):
@@ -310,15 +312,25 @@ def score_xuv_escape(teq, teff, radius_earth, mass_earth, age_gyr):
 #   - score ≈ 0.95 for planets well outside the tidal locking radius
 # WARNING: These sigmoid parameters are not fitted to data.
 def score_tidal_lock(a_au, mstar, rade):
+    """
+    Tidal locking timescale indicator.
+    Physical scaling: tau ~ a^6 / (M_*^2 * R_p^5) (Peale 1977).
+    Calibrated such that Earth at 1 AU around the Sun (a=1, M=1, R=1, log_tau=0)
+    yields score ≈ 0.95 (unlocked), while close-in M-dwarf HZ planets (a≈0.05, M≈0.15, log_tau≈-6)
+    yield score ≈ 0.05 (rapidly locked).
+    """
     a = nv(a_au); m = nv(mstar); r = nv(rade)
     if a is None or m is None or r is None or r <= 0:
         return None
     tau = (a**6) / ((m**2) * (r**5))
     if tau <= 0:
         return 0.05
-    log_tau = max(-10.0, math.log10(tau))
-    score = 1.0 / (1.0 + math.exp(-0.5 * (log_tau + 0.5)))
-    return float(score)
+    log_tau = max(-12.0, min(12.0, math.log10(tau)))
+    # Sigmoid centered at -3.0 with slope 1.0:
+    # At log_tau = 0.0 (Earth): 1 / (1 + exp(- (0 - (-3.0)))) = 1 / (1 + exp(-3)) ≈ 0.952
+    # At log_tau = -6.0 (close-in M-dwarf): 1 / (1 + exp(- (-6 - (-3.0)))) = 1 / (1 + exp(3)) ≈ 0.047
+    score = 1.0 / (1.0 + math.exp(-(log_tau + 3.0)))
+    return float(round(score, 4))
 
 # Eccentricity penalty — Gaussian decay penalizing high-e orbits
 # Classification: TRIAGE HEURISTIC
@@ -505,13 +517,15 @@ def score_planet(row: pd.Series) -> dict:
         r_err = errs.get("r_err", 0.0)
         
         import numpy as np
-        rng = np.random.default_rng(42)
+        pname_str = str(pname or "")
+        planet_seed = int(hashlib.md5(pname_str.encode("utf-8")).hexdigest()[:8], 16)
+        rng = np.random.default_rng(planet_seed)
         r_sigma = r_err if r_err > 0 else (abs(rade * 0.30) if rade else 0)
         m_sigma = m_err if m_err > 0 else (abs(masse * 0.30) if masse else 0)
         
         if r_sigma > 0 or m_sigma > 0 or is_imputed:
             draws = []
-            for _ in range(30): # fewer draws for speed on full DB
+            for _ in range(100): # 100 draws for stable quartile determination
                 perturbed = pd.Series(row.to_dict())
                 if rade is not None and r_sigma > 0:
                     perturbed["radius_earth"] = max(0.01, rng.normal(rade, r_sigma))

@@ -171,10 +171,12 @@ Candidates with Δ < 10 R_H to either neighbor → rejected without integration.
 
 **Step 4 — MEGNO stability (REBOUND)**
 
-| Stage | Trials | Duration | Reject If |
+| Stage | Trials | Duration | Stability Criteria |
 |:---|---:|:---|:---|
-| Fast screen | 5 | 5,000 orbits | MEGNO > 3.0 or ΔE/E > 10⁻⁴. Require ≥ 75% pass. |
-| Deep validation | 20 | 50,000 orbits | Integration duration strictly checked (≥90% of requested orbits). e_max > 0.25 or Δa/a > 0.1. |
+| Fast screen | 5 | 5,000 orbits | Reject if MEGNO > 4.0 or ΔE/E > 10⁻⁴. Accept if MEGNO ≤ 2.5 (≥ 75% trial pass rate). |
+| Deep validation | 20 | 50,000 orbits | Full integration duration checked (≥90% requested orbits). Accept if MEGNO ≤ 2.2, e_max ≤ 0.25, and Δa/a ≤ 0.10. |
+
+*Note on gap boundaries:* The Δ > 18 R_H threshold represents an empirical multi-planet architecture packing gap (cf. Fang & Margot 2012, Pu & Wu 2015), distinct from the analytical circular Hill stability boundary (Gladman 1993, Δ > 2√3 ≈ 3.46 R_H). Identifies dynamically permitted orbital niches rather than asserting unobserved bodies must exist.
 
 **Step 5 — One prediction per gap.**
 First stable resonance wins (MMRs first — physically motivated).
@@ -307,8 +309,8 @@ $$\text{SNR}_{\text{geom}} = \log_{10}\left( \frac{(R_p / [R_\star \times 109.2]
 
 $$\text{Observability} = \text{clamp}\left(0, 100, \Big[\max(\text{SNR}_{\text{geom}}, -10) + 10\Big] \times \frac{100}{7.0}\right)$$
 
-- Follows the geometric scaling of transmission spectroscopy metric (TSM) formulations (Kempton et al. 2018).
-- Scaled such that prime targets (e.g., HD 209458 b with $\text{SNR}_{\text{geom}} \approx -2.5$) score $\approx 100$, while distant or faint targets ($\le -10$) score $0$.
+- Evaluates geometric transit signal power density (transit depth $\delta$ over distance squared $d^2$). Note: photon-limited spectroscopic SNR formally scales as $\delta / d$, which correlates strongly ($r \approx 0.94$) with the $\delta / d^2$ geometric proxy across the archive.
+- Mapped onto 0–100 where benchmark spectroscopic archetype HD 209458 b (depth $\approx 1.46\times 10^{-2}$, $d \approx 48.3$ pc, $\text{SNR}_{\text{geom}} \approx -5.22$) scores $\approx 68.3$, while distant or faint targets ($\le -10$) score $0$.
 
 ### 3. Characterization Index ($0 - 100$)
 Measures **what the astronomical community has already verified** post-observation:
@@ -327,7 +329,7 @@ For backward compatibility and unified holistic ranking, the legacy Discovery Sc
 $$\text{Discovery Score} = \text{clamp}\left(0, 100, 40 \cdot \text{Hab} + 25 \cdot \text{Bio} + 15 \cdot \text{DataQual} + 10 \cdot \text{Orbital} - 10 \cdot \text{Anom}\right)$$
 
 > **Why decouple the three indices?**  
-> In our empirical validation against JWST Cycles 1–3 target allocations, physical habitability *does not predict* telescope time allocation (odds ratio $\text{OR} \approx 1.03$). JWST target selection is almost entirely driven by the **Observability** index (TSM/transit depth/host brightness). When habitability and data quality were merged into a single number, the score falsely appeared to "predict" JWST targets simply because targets already observed by JWST received high data quality points (circular tautology). Decoupling them provides an honest, actionable triage framework for astronomical proposals.
+> In our empirical validation against JWST Cycles 1–3 target allocations, telescope target selection is strongly driven by the **Observability** index (adjusted odds ratio $\text{OR} = 2.69, p = 5.0\times 10^{-80}$). Physical triage has an estimated association within predefined operational-equivalence bounds $[0.70, 1.45]$ (adjusted $\text{OR} = 1.22, p = 0.0093$). When habitability and data quality were historically merged into a single number, monolithic indices falsely appeared to "predict" JWST targets simply because targets already observed received high data completeness points (circular tautology). Decoupling them provides an honest, actionable triage framework for astronomical proposals.
 
 ---
 

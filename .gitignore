@@ -48,6 +48,8 @@ Thumbs.db
 outputs/
 data/
 *.csv
+!jwst_targets.csv
+!validation/jwst_targets.csv
 *.sqlite3
 *.parquet
 *.tbl

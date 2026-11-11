@@ -7,6 +7,7 @@ penalties, instrument weighting, tier classification, and constants integrity.
 import pytest
 
 from modules.biosignature_detector import (
+    unmix_spectrum,
     classify_detection,
     CONFIRMED_SIGMA,
     MARGINAL_SIGMA,
@@ -180,3 +181,77 @@ class TestBiosigConstants:
     def test_all_molecules_have_band_centers(self):
         for mol in TARGET_MOLECULES:
             assert mol in MOL_BAND_CENTERS, f"{mol} missing from MOL_BAND_CENTERS"
+
+
+# ── Unmix Spectrum Tests ───────────────────────────────────────────────────
+
+import numpy as np
+import pandas as pd
+
+class TestUnmixSpectrum:
+    def test_unmix_spectrum_executes_without_name_error(self):
+        """Verify unmix_spectrum runs cleanly without NameError: marginal_sigma."""
+        wl = np.linspace(1.0, 5.0, 100)
+        depth = np.full(100, 1000.0) + np.random.normal(0, 5.0, 100)
+        err = np.full(100, 10.0)
+        df_spec = pd.DataFrame({
+            "wavelength_um": wl,
+            "depth_ppm": depth,
+            "depth_err_upper": err,
+            "depth_err_lower": err,
+        })
+        
+        # Mock H2O and CO2 templates with discrete peaks
+        t_h2o = np.zeros(100)
+        t_h2o[20:25] = [20, 50, 100, 50, 20]
+        t_h2o[60:65] = [15, 40, 80, 40, 15]
+        
+        t_co2 = np.zeros(100)
+        t_co2[40:45] = [30, 70, 150, 70, 30]
+        
+        templates = {
+            "h2o": pd.DataFrame({"wavelength_um": wl, "flux": t_h2o}),
+            "co2": pd.DataFrame({"wavelength_um": wl, "flux": t_co2}),
+        }
+        phys = {}
+        
+        # Must execute without raising NameError
+        detections = unmix_spectrum(df_spec, templates, phys)
+        assert isinstance(detections, list)
+
+    def test_unmix_spectrum_injection_recovery(self):
+        """Verify injected template is recovered with positive significance."""
+        wl = np.linspace(1.0, 5.0, 100)
+        t_flux = np.zeros(100)
+        t_flux[30:35] = [50, 120, 300, 120, 50]
+        t_flux[70:75] = [40, 100, 250, 100, 40]
+        
+        # Inject H2O absorption signal
+        depth = np.full(100, 1000.0) + t_flux + np.random.normal(0, 5.0, 100)
+        err = np.full(100, 10.0)
+        df_spec = pd.DataFrame({
+            "wavelength_um": wl,
+            "depth_ppm": depth,
+            "depth_err_upper": err,
+            "depth_err_lower": err,
+        })
+        templates = {
+            "h2o": pd.DataFrame({"wavelength_um": wl, "flux": t_flux}),
+        }
+        phys = {}
+        
+        detections = unmix_spectrum(df_spec, templates, phys)
+        assert len(detections) == 1
+        assert detections[0]["molecule"] == "h2o"
+        assert detections[0]["detection_sigma"] > 3.0
+        assert detections[0]["template_feature_peak_count"] >= 1
+
+    def test_classify_detection_trials_factor_correction(self):
+        """Verify trials-corrected sigma is strictly <= raw sigma for M=7 candidate molecules."""
+        det = make_det(sigma=4.0, matches=4)
+        result = classify_detection(det, [det], {}, None)
+        assert "raw_sigma" in result
+        assert "trials_corrected_sigma" in result
+        assert result["raw_sigma"] == 4.0
+        assert result["trials_corrected_sigma"] <= result["raw_sigma"]
+        assert result["trials_corrected_sigma"] >= 3.0  # 4 sigma still highly significant after Sidak correction

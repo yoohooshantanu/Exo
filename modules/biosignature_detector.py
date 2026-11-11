@@ -261,7 +261,7 @@ def fit_gp_continuum(spectrum_df):
     return continuum
 
 
-def unmix_spectrum(spectrum_df, templates_dict, phys_params):
+def unmix_spectrum(spectrum_df, templates_dict, phys_params, marginal_sigma=MARGINAL_SIGMA):
     """
     Simultaneously fit multiple molecular templates (OLS) to GP-detrended spectrum.
     Replaces match_molecule. Returns a list of detection dictionaries, one for each molecule.
@@ -411,19 +411,34 @@ def unmix_spectrum(spectrum_df, templates_dict, phys_params):
 # ── detection classification ─────────────────────────────────────────────────
 
 def classify_detection(det, all_detections_for_planet, phys_params, host_spectral_type, marginal_sigma=MARGINAL_SIGMA):
-    """Apply two-tier classification, abiotic reasoning, stellar contamination, and instrument weighting."""
+    """
+    Apply statistical multiple-testing correction, two-tier classification,
+    and distinct heuristic astrophysical credibility scoring.
+    """
+    import scipy.stats as stats
     mol = det["molecule"]
-    sigma = det["detection_sigma"]
+    raw_sigma = float(det["detection_sigma"])
     matches = det["hitran_match_count"]
     notes = ""
     
-    # 0. Cloud/Haze Suppression Muting
+    # 0. Statistical Multiple Testing Correction (Trials factor for M=7 candidate molecules)
+    # Using Sidak correction: alpha_corrected = 1 - (1 - alpha_single)^M
+    p_single = float(stats.norm.sf(raw_sigma)) if raw_sigma > 0 else 1.0
+    p_corrected = float(1.0 - (1.0 - p_single) ** len(TARGET_MOLECULES)) if 0 <= p_single <= 1 else 1.0
+    trials_corrected_sigma = float(stats.norm.isf(p_corrected)) if 0 < p_corrected < 1 else (raw_sigma if p_corrected <= 0 else 0.0)
+    
+    det["raw_sigma"] = round(raw_sigma, 3)
+    det["trials_corrected_sigma"] = round(trials_corrected_sigma, 3)
+    det["trials_corrected_p"] = f"{p_corrected:.2e}"
+
+    sigma = raw_sigma
+
+    # 1. Cloud/Haze Suppression Muting
     if det.get("is_muted"):
         sigma = max(0.0, sigma - 0.5)
-        det["detection_sigma"] = round(sigma, 3)
-        notes += "Cloud/Haze muting detected: spectrum variance suppressed. -0.5σ penalty applied. "
+        notes += "Cloud/Haze muting detected: spectrum variance suppressed (-0.5σ penalty applied). "
     
-    # 1. Instrument Weighting
+    # 2. Instrument Weighting
     inst = str(det.get("instrument") or "").lower()
     fac = str(det.get("facility") or "").lower()
     weight = DEFAULT_INSTRUMENT_WEIGHT
@@ -434,18 +449,16 @@ def classify_detection(det, all_detections_for_planet, phys_params, host_spectra
     
     if weight < 1.0:
         sigma = sigma * weight
-        det["detection_sigma"] = round(sigma, 3)
         notes += f"Instrument weight {weight} applied. "
 
-    # 2. Stellar Contamination Filter
+    # 3. Stellar Contamination Filter
     st_prefix = str(host_spectral_type)[0].upper() if host_spectral_type else ""
     if st_prefix in STELLAR_CONTAM_RISK and mol in STELLAR_CONTAM_RISK[st_prefix]:
         penalty = STELLAR_CONTAM_RISK[st_prefix][mol]
         sigma = max(0.0, sigma - penalty)
-        det["detection_sigma"] = round(sigma, 3)
-        notes += f"Stellar contamination risk ({st_prefix}-dwarf {mol} mimicry): -{penalty}σ penalty. "
+        notes += f"Stellar contamination risk ({st_prefix}-dwarf {mol} mimicry: -{penalty}σ penalty). "
 
-    # 3. Expanded Abiotic Reasoning
+    # 4. Expanded Abiotic Reasoning
     detected_mols = {d["molecule"]: d["detection_sigma"] for d in all_detections_for_planet}
     abiotic = False if mol in ABIOTIC_MOLECULES else None
     
@@ -453,7 +466,7 @@ def classify_detection(det, all_detections_for_planet, phys_params, host_spectra
     if mol == "ch4":
         if detected_mols.get("co2", 0) < marginal_sigma:
             sigma = max(0.0, sigma - 1.0)
-            notes += "CH4 without CO2: possible abiotic origin, -1.0σ penalty. "
+            notes += "CH4 without CO2: possible abiotic origin (-1.0σ penalty). "
             
     # Thermochemical disequilibrium (H2O + CH4 without O3)
     if DISEQ_PAIR.issubset(set(detected_mols.keys())) and mol in DISEQ_PAIR:
@@ -463,8 +476,8 @@ def classify_detection(det, all_detections_for_planet, phys_params, host_spectra
     # Triple biosignature check
     if TRIPLE_BIOSIG.issubset(set(d for d, s in detected_mols.items() if s >= CONFIRMED_SIGMA)):
         if mol in TRIPLE_BIOSIG:
-            abiotic = None  # Candidate photochemical disequilibrium pattern; requires stellar UV & volcanic modeling before ruling out abiotic origins
-            notes += "Candidate photochemical disequilibrium pattern (H2O+CH4+O3); requires stellar UV and volcanic false-positive modeling before ruling out abiotic sources. "
+            abiotic = None  # Candidate photochemical disequilibrium pattern
+            notes += "Candidate photochemical disequilibrium pattern (H2O+CH4+O3); requires stellar UV and volcanic false-positive modeling. "
             
     # CO / CO2 ratio
     if mol == "co" and detected_mols.get("co2", 0) >= marginal_sigma:
@@ -481,11 +494,11 @@ def classify_detection(det, all_detections_for_planet, phys_params, host_spectra
         abiotic = False
     elif mol == "nh3":
         if is_rocky:
-            sigma += 0.5  # NH3 on rocky is highly anomalous
-            notes += "NH3 on rocky world: anomalous, +0.5σ boost. "
+            sigma += 0.5
+            notes += "NH3 on rocky world: anomalous (+0.5σ boost). "
         else:
-            sigma = max(0.0, sigma - 1.0) # NH3 expected on gas giants
-            notes += "NH3 on gas giant: expected, -1.0σ penalty. "
+            sigma = max(0.0, sigma - 1.0)
+            notes += "NH3 on gas giant: expected (-1.0σ penalty). "
             abiotic = False
             
     # O3 on M-dwarfs
@@ -493,19 +506,18 @@ def classify_detection(det, all_detections_for_planet, phys_params, host_spectra
         notes += "O3 on M-dwarf planet: possible photochemical false positive. "
 
     det["detection_sigma"] = round(sigma, 3)
+    det["heuristic_score"] = round(sigma, 3)
 
-    # 4. Tier classification (screening candidate vs marginal)
-    # Note: ≥3 peaks and ≥3σ represent a statistically significant screening candidate,
-    # not a definitive molecular discovery (which requires line-by-line instrumental calibration).
+    # 5. Tier classification (screening candidate vs marginal)
     if matches >= 3 and sigma >= CONFIRMED_SIGMA:
         tier = "screening_candidate"
-        notes = f"Statistically significant template match ({sigma:.1f}σ, {matches} feature peaks; candidate screened). " + notes
+        notes = f"Statistically significant template match ({sigma:.1f}σ, raw {raw_sigma:.1f}σ, trials-adj {trials_corrected_sigma:.1f}σ, {matches} peaks; candidate screened). " + notes
     elif matches >= 2 and sigma >= marginal_sigma:
         tier = "marginal"
-        notes = f"Tier 2 marginal match ({sigma:.1f}σ, {matches} feature peaks). " + notes
+        notes = f"Tier 2 marginal match ({sigma:.1f}σ, raw {raw_sigma:.1f}σ, trials-adj {trials_corrected_sigma:.1f}σ, {matches} peaks). " + notes
     else:
         tier = "rejected"
-        notes = f"Rejected ({sigma:.1f}σ, {matches} feature peaks). " + notes
+        notes = f"Rejected ({sigma:.1f}σ, {matches} peaks). " + notes
 
     det["abiotic_ruled_out"] = abiotic
     det["method_notes"] = notes.strip()

@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+message: "If you use Exo in academic research, please cite it as below."
+authors:
+  - family-names: "Exo Contributors"
+title: "Exo: Open-Source Exoplanet Characterization and Prioritization Pipeline"
+version: 1.0.0
+date-released: 2026-11-11
+url: "https://github.com/yoohooshantanu/Exo"
+keywords:
+  - astronomy
+  - exoplanets
+  - habitability
+  - biosignatures
+  - orbital-dynamics
+  - jwst

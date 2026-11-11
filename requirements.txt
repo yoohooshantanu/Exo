@@ -42,8 +42,10 @@ prefect>=2.16.0
 # Feed Parsing
 feedparser>=6.0.11
 
-# Plotting
+# Plotting & Statistics
 matplotlib>=3.8.0
+seaborn>=0.13.0
+statsmodels>=0.14.0
 
 # HITRAN
 hitran-api>=1.0.0

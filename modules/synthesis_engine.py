@@ -28,7 +28,11 @@ from modules.db_sync import create_sync_engine
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-from modules.config import HABITABILITY_MODEL_VERSION as SCORE_VERSION, ORBITAL_MODEL_VERSION as PRED_VERSION
+from modules.config import (
+    HABITABILITY_MODEL_VERSION as SCORE_VERSION,
+    ORBITAL_MODEL_VERSION as PRED_VERSION,
+    SYNTHESIS_MODEL_VERSION as MODEL_VERSION,
+)
 
 engine  = create_sync_engine()
 Session = sessionmaker(bind=engine)
