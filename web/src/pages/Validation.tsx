@@ -54,7 +54,7 @@ const jwstQuintileConfig = {
   jwst_targets: { label: 'JWST Allocated Targets', color: 'var(--chart-1)' },
 } satisfies ChartConfig
 
-// ── Ground Truth Benchmark Datasets ─────────────────────────────────────────
+// ── Reference Benchmark Datasets ───────────────────────────────────────────
 
 const UPR_BENCHMARKS = [
   { planet: "TRAPPIST-1 e", ours: 0.954, published: 0.850, delta: "+0.104", status: "PASS", note: "Rocky archetype; enhanced with conservative HZ constraint" },
@@ -200,7 +200,7 @@ export default function Validation() {
             <span className={`size-1.5 rounded-full ${isOnline ? "bg-emerald-400" : isFailed ? "bg-red-400" : "bg-zinc-500"}`} />
             <span>
               {isOnline 
-                ? "Automated Pipeline Validation Suite • Empirical Benchmarks Verified" 
+                ? "Automated Pipeline Validation Suite • Benchmark Checks Completed" 
                 : isFailed 
                 ? "Automated Pipeline Validation Suite • Validation Failed" 
                 : "Automated Pipeline Validation Suite • Not Evaluated"}
@@ -210,7 +210,7 @@ export default function Validation() {
             Scientific Validation &amp; Allocation Study
           </h1>
           <p className="text-sm text-zinc-400 mt-1 max-w-2xl">
-            Empirical ground-truth verification across UPR published catalogs, Solar System controls, and real-world JWST Cycles 1–3 approved spectroscopic proposals.
+            Benchmark comparisons against published UPR ESI references, Solar System physical sanity controls, and historical JWST Cycle 1–3 target allocations.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -312,17 +312,17 @@ export default function Validation() {
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <span className="text-zinc-500 uppercase">Engine Architecture:</span>
-            <span className="text-zinc-200 font-medium">Habitability v{data?.evaluation_run?.engine_version ?? "5.0.0"} &bull; Orbit v{data?.evaluation_run?.orbital_version ?? "3.1.0"} &bull; Biosig v{data?.evaluation_run?.biosig_version ?? "3.0.0"}</span>
+            <span className="text-zinc-200 font-medium">Habitability v{data?.evaluation_run?.engine_version ?? "Unavailable"} &bull; Orbit v{data?.evaluation_run?.orbital_version ?? "Unavailable"} &bull; Biosig v{data?.evaluation_run?.biosig_version ?? "Unavailable"}</span>
           </div>
           <p className="text-[11px] text-zinc-400">
-            Source: <strong>{data?.evaluation_run?.benchmark_dataset ?? "UPR Published Catalog + NASA Exoplanet Archive + Gaia DR3"}</strong> ({data?.evaluation_run?.test_cases_evaluated != null ? `${data.evaluation_run.test_cases_evaluated.toLocaleString()} confirmed systems evaluated` : "Evaluation pending"})
+            Source: <strong>{data?.evaluation_run?.benchmark_dataset ?? "Unavailable"}</strong> ({data?.evaluation_run?.test_cases_evaluated != null ? `${data.evaluation_run.test_cases_evaluated.toLocaleString()} confirmed systems evaluated` : "Evaluation pending"})
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className={`size-2 rounded-full ${isOnline ? "bg-emerald-400" : isFailed ? "bg-red-400" : "bg-zinc-500"}`} />
           <span className={`font-medium ${isOnline ? "text-emerald-400" : isFailed ? "text-red-400" : "text-zinc-400"}`}>
             {isOnline 
-              ? "Pipeline Verified • Ground-Truth Calibrated" 
+              ? "Validation Suite Passed • Benchmark Checks Completed" 
               : isFailed 
               ? "Pipeline Verification Failed" 
               : "Pipeline Not Evaluated"}
@@ -392,6 +392,9 @@ export default function Validation() {
                   <p className="text-[11px] text-zinc-400 mt-2 font-mono text-center">
                     88% of the listed JWST targets (44 of 50) fall within the top 40% of observability scores.
                   </p>
+                  <p className="text-[10px] text-zinc-500 font-mono text-center mt-1">
+                    Dataset reference: Approved STScI Cycles 1–3 GO &amp; GTO programs (Oct 2024 snapshot; pre-2024 confirmed systems).
+                  </p>
                 </div>
 
                 {/* Logistic Regression Stats Table */}
@@ -439,12 +442,17 @@ export default function Validation() {
 
               {/* Verified JWST Target Matrix */}
               <div className="space-y-3 pt-4 border-t border-zinc-800/80">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-mono uppercase tracking-wider text-zinc-400">
-                    External Published Reference Benchmarks: JWST Cycles 1–3 Spectroscopy
-                  </h4>
-                  <Badge variant="outline" className="text-[10px] font-mono border-zinc-800 text-zinc-400">
-                    Cycles 1–3 Programs
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-mono uppercase tracking-wider text-zinc-400">
+                      External Published Reference Benchmarks: JWST Cycles 1–3 Spectroscopy
+                    </h4>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">
+                      Cross-checks compiled from STScI program allocations and published literature (ERS 1366, GTO 1177/1279/1288, GO 2722, GO 2334, GO 2487, GO 3474; Oct 2024 snapshot).
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="text-[10px] font-mono border-zinc-800 text-zinc-400 shrink-0">
+                    Cycles 1–3 Snapshot (Oct 2024)
                   </Badge>
                 </div>
 
@@ -501,8 +509,21 @@ export default function Validation() {
                     Solar System Sanity Controls (Zero-Point Calibration)
                   </CardTitle>
                 </div>
-                <Badge variant="outline" className={`text-[10px] font-mono ${allControlsPassed ? "border-emerald-800/60 text-emerald-400 bg-emerald-950/40" : "border-red-800/60 text-red-400 bg-red-950/40"}`}>
-                  {allControlsPassed ? "All 4 Controls Passed" : "Controls Calibration Failed"}
+                <Badge 
+                  variant="outline" 
+                  className={`text-[10px] font-mono ${
+                    !hasControls
+                      ? "border-zinc-800 text-zinc-400 bg-zinc-900/40"
+                      : allControlsPassed
+                      ? "border-emerald-800/60 text-emerald-400 bg-emerald-950/40"
+                      : "border-red-800/60 text-red-400 bg-red-950/40"
+                  }`}
+                >
+                  {!hasControls
+                    ? "Not evaluated"
+                    : allControlsPassed
+                    ? "All 4 Controls Passed"
+                    : "Controls Calibration Failed"}
                 </Badge>
               </div>
               <CardDescription className="text-xs text-zinc-400">
