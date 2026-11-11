@@ -12,10 +12,11 @@ Exo is a modular exoplanet characterization and discovery prioritization platfor
 
 1. **Habitability Engine (`modules/habitability_scorer.py`)**: Computes physical similarity and environmental safety metrics across thermal equilibrium, stellar UV/X-ray exposure, planetary density, and orbital eccentricity.
 2. **Orbital Dynamics Engine (`modules/orbital_engine.py`)**: Evaluates dynamical stability, mean-motion resonance (MMR) proximity, and MEGNO ($\langle Y \rangle$) chaos indicators across multi-planet architectures.
-3. **Atmospheric / Biosignature Detector (`modules/biosignature_detector.py`)**: Performs molecular template cross-correlation ($\ge 3\sigma$ candidate threshold; $2\text{--}3\sigma$ marginal tier) against HITRAN linelists (e.g., $\text{H}_2\text{O}$, $\text{CO}_2$, $\text{CH}_4$, $\text{O}_3$, $\text{SO}_2$, $\text{NH}_3$).
+3. **Atmospheric / Biosignature Detector (`modules/biosignature_detector.py`)**: Performs molecular template cross-correlation against HITRAN linelists (e.g., $\text{H}_2\text{O}$, $\text{CO}_2$, $\text{CH}_4$, $\text{O}_3$, $\text{SO}_2$, $\text{NH}_3$, $\text{N}_2\text{O}$). Reports raw unadulterated OLS significance ($\sigma$), Šidák multiple-testing corrected significance across candidate molecule trials ($\alpha_{\text{corrected}} = 1 - (1 - \alpha)^{1/M}$), and flags heuristic contextual adjustments separately.
 4. **Spectral Retrieval Pipeline (`modules/atmospheric_retrieval.py`)**: Forward-models transmission spectroscopy and performs atmospheric property estimation.
 5. **Multi-Criteria Planetary Prioritization (`modules/discovery_scorer.py`)**: Decouples operational observability (transit depth, host brightness, geometric probability) from intrinsic physical triage to prevent circularity in target allocation.
 6. **Data Quality & Anomaly Detection (`modules/anomaly_detector.py`)**: Flags astrophysical outliers, physical constraint violations, and observation artifacts.
+7. **Orbital Permitted Zones & Retrodiction (`modules/orbital_gap_predictor.py`)**: Evaluates dynamically permitted orbital niches in multi-planet systems using Gladman mutual Hill radius clearance ($\Delta > 2\sqrt{3} R_H$) and REBOUND MEGNO ($\langle Y \rangle$) chaos indicators.
 
 ---
 
@@ -64,11 +65,11 @@ Exo evaluates its pipelines against four database-backed validation tracks recor
 
 ## 4. Reproducibility & Verification
 
-### Running the Backend Test Suite
+### Running the Full Test Suite
 ```bash
-pytest tests/test_api_endpoints.py tests/test_habitability_scorer.py tests/test_orbital_helpers.py tests/test_biosignature_detector.py
+pytest
 ```
-*Current test suite result: 114 passed.*
+*Current test suite result: 182 passed, 0 failures.*
 
 ### Recording Live Validation Runs
 ```bash
