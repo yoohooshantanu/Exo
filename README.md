@@ -137,7 +137,7 @@ $$P_{\text{rocky}}(R_p, M_p) = \frac{1}{1 + \exp\left(\frac{R_p - 1.80\,R_\oplus
 
 $$\mathbf{\text{Composite Habitability}} = \Big(0.70 \cdot \text{ESI} + 0.30 \cdot \text{Safety}\Big) \times P_{\text{rocky}}(R_p, M_p)$$
 
-- **Uncertainty Propagation**: Every score includes a 30-trial Monte Carlo IQR ($\pm \text{IQR} = Q_{75} - Q_{25}$) sampled over measured radius and mass parameter error distributions.
+- **Uncertainty Propagation**: Every score includes a 100-trial deterministic Monte Carlo IQR ($\pm \text{IQR} = Q_{75} - Q_{25}$) sampled over measured parameter error distributions (tracked in `planet_uncertainties.csv`), with transparent audit tracking (`measured` vs `default_30pct_fallback`).
 - **Provenance & Imputation**: Planets lacking measured masses fall back to empirical mass-radius relations ($M \sim R^{3.5}$ for rocky / $M \sim R^{2.06}$ for gaseous) and are explicitly flagged with a `Mass Imputed` badge.
 
 <br>
@@ -176,7 +176,7 @@ Candidates with Δ < 10 R_H to either neighbor → rejected without integration.
 | Fast screen | 5 | 5,000 orbits | Reject if MEGNO > 4.0 or ΔE/E > 10⁻⁴. Accept if MEGNO ≤ 2.5 (≥ 75% trial pass rate). |
 | Deep validation | 20 | 50,000 orbits | Full integration duration checked (≥90% requested orbits). Accept if MEGNO ≤ 2.2, e_max ≤ 0.25, and Δa/a ≤ 0.10. |
 
-*Note on gap boundaries:* The Δ > 18 R_H threshold represents an empirical multi-planet architecture packing gap (cf. Fang & Margot 2012, Pu & Wu 2015), distinct from the analytical circular Hill stability boundary (Gladman 1993, Δ > 2√3 ≈ 3.46 R_H). Identifies dynamically permitted orbital niches rather than asserting unobserved bodies must exist.
+*Note on gap boundaries & resonant chains:* The Δ > 18 R_H threshold represents an empirical multi-planet architecture packing gap (cf. Fang & Margot 2012, Pu & Wu 2015), distinct from the analytical circular Hill stability boundary (Gladman 1993, Δ > 2√3 ≈ 3.46 R_H). Identifies dynamically permitted orbital niches rather than asserting unobserved bodies must exist. While phase-blind circular integration recovers regular motion in non-resonant systems (e.g., Sun-Venus-Mars gap with Earth masked, $\langle Y \rangle \le 2.2$), tightly packed resonant chains (e.g., TRAPPIST-1, where phase-blind insertion breaks Laplace libration angles yielding $\langle Y \rangle > 4.0$) require dedicated resonant angle phase-space search.
 
 **Step 5 — One prediction per gap.**
 First stable resonance wins (MMRs first — physically motivated).

@@ -48,8 +48,8 @@ class TestTierClassification:
         assert result["tier"] in ("screening_candidate", "confirmed")
 
     def test_marginal_tier(self):
-        """Moderate sigma + 2 lines → marginal."""
-        det = make_det(sigma=2.5, matches=2)
+        """Moderate sigma + 2 lines → marginal (requires trials-corrected sigma >= 2.0)."""
+        det = make_det(sigma=2.8, matches=2)
         result = classify_detection(det, [det], {}, None)
         assert result["tier"] == "marginal"
 
@@ -255,3 +255,68 @@ class TestUnmixSpectrum:
         assert result["raw_sigma"] == 4.0
         assert result["trials_corrected_sigma"] <= result["raw_sigma"]
         assert result["trials_corrected_sigma"] >= 3.0  # 4 sigma still highly significant after Sidak correction
+
+    def test_tier_governed_by_trials_corrected_sigma(self):
+        """
+        Verify that detection tiers are strictly governed by trials-corrected sigma,
+        so that a nominal 3.0σ raw detection (which drops to ~2.35σ under M=7 trials factor)
+        does not falsely qualify as a screening_candidate.
+        """
+        # Raw 3.0σ with 3 matches:
+        det_3sigma = make_det(sigma=3.0, matches=3)
+        res_3sigma = classify_detection(det_3sigma, [det_3sigma], {}, None)
+        assert res_3sigma["trials_corrected_sigma"] < 3.0
+        assert res_3sigma["tier"] == "marginal", "Raw 3.0σ must drop to marginal after M=7 trials correction"
+
+        # Strong 4.0σ with 3 matches (trials-corrected >= 3.0σ):
+        det_4sigma = make_det(sigma=4.0, matches=3)
+        res_4sigma = classify_detection(det_4sigma, [det_4sigma], {}, None)
+        assert res_4sigma["trials_corrected_sigma"] >= 3.0
+        assert res_4sigma["tier"] == "screening_candidate", ">=3.0σ trials-corrected must qualify as screening_candidate"
+
+    def test_correlated_red_noise_null_hypothesis(self):
+        """
+        Null hypothesis test under correlated (red) noise.
+        Simulate 50 red-noise spectra (AR(1) phi=0.65) and verify that GLS pre-whitening
+        and Sidak trials correction maintain false positive screening_candidate rate < 5%.
+        """
+        np.random.seed(123)
+        wl = np.linspace(1.0, 5.0, 100)
+        phi = 0.65
+        
+        # 3 distinct molecular templates
+        templates = {
+            "h2o": pd.DataFrame({"wavelength_um": wl, "flux": np.exp(-0.5 * ((wl - 2.5) / 0.1)**2) * 100.0}),
+            "ch4": pd.DataFrame({"wavelength_um": wl, "flux": np.exp(-0.5 * ((wl - 3.3) / 0.1)**2) * 100.0}),
+            "co2": pd.DataFrame({"wavelength_um": wl, "flux": np.exp(-0.5 * ((wl - 4.3) / 0.1)**2) * 100.0}),
+        }
+        phys = {}
+
+        candidate_count = 0
+        n_trials = 50
+
+        for _ in range(n_trials):
+            noise = np.zeros(100)
+            white = np.random.normal(0, 5.0, 100)
+            noise[0] = white[0]
+            for t in range(1, 100):
+                noise[t] = phi * noise[t-1] + np.sqrt(1 - phi**2) * white[t]
+
+            depth = np.full(100, 1000.0) + noise
+            err = np.full(100, 5.0)
+            df_spec = pd.DataFrame({
+                "wavelength_um": wl,
+                "depth_ppm": depth,
+                "depth_err_upper": err,
+                "depth_err_lower": err,
+            })
+
+            dets = unmix_spectrum(df_spec, templates, phys)
+            for d in dets:
+                classified = classify_detection(d, dets, phys, None)
+                if classified["tier"] == "screening_candidate":
+                    candidate_count += 1
+                    break
+
+        false_positive_rate = candidate_count / n_trials
+        assert false_positive_rate < 0.05, f"False positive rate under red noise ({false_positive_rate:.1%}) must be < 5%"

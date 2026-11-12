@@ -351,9 +351,37 @@ def unmix_spectrum(spectrum_df, templates_dict, phys_params, marginal_sigma=MARG
         residuals = y_w - X @ beta
         dof = len(y_w) - len(beta)
         if dof > 0:
-            mse = np.sum(residuals**2) / dof
-            cov = mse * np.linalg.inv(XTX)
-            beta_errors = np.sqrt(np.diag(cov))
+            # Check for serial correlation (red noise) in spectral residuals
+            r_denom = float(np.sum(residuals**2))
+            rho = float(np.sum(residuals[1:] * residuals[:-1]) / r_denom) if r_denom > 0 else 0.0
+            rho = float(np.clip(rho, 0.0, 0.95))
+
+            if rho > 0.05:
+                # Generalized Least Squares (Prais-Winsten transformation) to de-correlate red noise
+                y_pw = np.zeros_like(y_w)
+                y_pw[0] = np.sqrt(1.0 - rho**2) * y_w[0]
+                y_pw[1:] = y_w[1:] - rho * y_w[:-1]
+
+                X_pw = np.zeros_like(X)
+                X_pw[0] = np.sqrt(1.0 - rho**2) * X[0]
+                X_pw[1:] = X[1:] - rho * X[:-1]
+
+                XTX_pw = X_pw.T @ X_pw + np.eye(X_pw.shape[1]) * 1e-8
+                beta = np.linalg.inv(XTX_pw) @ (X_pw.T @ y_pw)
+                residuals = y_pw - X_pw @ beta
+
+                # Check for any residual autocorrelation and apply effective sample size variance inflation
+                r_denom2 = float(np.sum(residuals**2))
+                rho2 = float(np.sum(residuals[1:] * residuals[:-1]) / r_denom2) if r_denom2 > 0 else 0.0
+                vif = float((1.0 + rho2) / (1.0 - rho2)) if (0.0 < rho2 < 0.9) else 1.0
+
+                mse = (float(np.sum(residuals**2)) / dof) * vif
+                cov = mse * np.linalg.inv(XTX_pw)
+                beta_errors = np.sqrt(np.maximum(0.0, np.diag(cov)))
+            else:
+                mse = float(np.sum(residuals**2)) / dof
+                cov = mse * np.linalg.inv(XTX)
+                beta_errors = np.sqrt(np.maximum(0.0, np.diag(cov)))
         else:
             beta_errors = np.ones_like(beta) * np.inf
     except np.linalg.LinAlgError:
@@ -509,15 +537,18 @@ def classify_detection(det, all_detections_for_planet, phys_params, host_spectra
     det["heuristic_score"] = round(sigma, 3)
 
     # 5. Tier classification (screening candidate vs marginal)
-    if matches >= 3 and sigma >= CONFIRMED_SIGMA:
+    # Tier classification MUST be governed strictly by trials-corrected significance
+    # (combined with discrete spectral peak validation and heuristic consistency).
+    heuristic_score = sigma
+    if matches >= 3 and trials_corrected_sigma >= CONFIRMED_SIGMA and heuristic_score >= CONFIRMED_SIGMA:
         tier = "screening_candidate"
-        notes = f"Statistically significant template match ({sigma:.1f}σ, raw {raw_sigma:.1f}σ, trials-adj {trials_corrected_sigma:.1f}σ, {matches} peaks; candidate screened). " + notes
-    elif matches >= 2 and sigma >= marginal_sigma:
+        notes = f"Statistically significant template match (trials-adj {trials_corrected_sigma:.1f}σ, raw {raw_sigma:.1f}σ, {matches} peaks; candidate screened). " + notes
+    elif matches >= 2 and trials_corrected_sigma >= MARGINAL_SIGMA and heuristic_score >= MARGINAL_SIGMA:
         tier = "marginal"
-        notes = f"Tier 2 marginal match ({sigma:.1f}σ, raw {raw_sigma:.1f}σ, trials-adj {trials_corrected_sigma:.1f}σ, {matches} peaks). " + notes
+        notes = f"Tier 2 marginal match (trials-adj {trials_corrected_sigma:.1f}σ, raw {raw_sigma:.1f}σ, {matches} peaks). " + notes
     else:
         tier = "rejected"
-        notes = f"Rejected ({sigma:.1f}σ, {matches} peaks). " + notes
+        notes = f"Rejected (trials-adj {trials_corrected_sigma:.1f}σ, raw {raw_sigma:.1f}σ, {matches} peaks). " + notes
 
     det["abiotic_ruled_out"] = abiotic
     det["method_notes"] = notes.strip()

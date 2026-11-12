@@ -111,6 +111,6 @@ if __name__ == "__main__":
         delta = f"{p['delta']:+.4f}" if p["delta"] is not None else "N/A"
         print(f"  {p['name']:<22s} {ours:>8s} {p['published_esi']:>10.4f} {delta:>8s}")
     print(f"\n  Pearson r  = {result['pearson_r']}")
-    print(f"  Spearman ρ = {result['spearman_rho']}")
+    print(f"  Spearman rho = {result['spearman_rho']}")
     print(f"  Result: {result['message']}")
     print(f"{'='*70}\n")

@@ -19,8 +19,10 @@ def pytest_configure(config):
     # Set dummy DB URL
     os.environ["DATABASE_URL"] = "postgresql+asyncpg://test:test@localhost:5432/testdb"
 
-    # Mock heavy native dependencies that may not be installed in test env
-    if "rebound" not in sys.modules:
+    # Mock heavy native dependencies only if not installed in the test env
+    try:
+        import rebound
+    except ImportError:
         sys.modules["rebound"] = MagicMock()
 
     # Monkey-patch sqlalchemy before any module can call create_engine()

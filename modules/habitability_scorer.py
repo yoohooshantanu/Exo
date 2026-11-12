@@ -210,6 +210,13 @@ def compute_similarity_esi(radius, mass, teq):
     m = nv(mass)
     t = nv(teq)
 
+    # Standard UPR / Schulze-Makuch et al. 2011 empirical scaling:
+    # When mass is unmeasured, impute mass from radius using standard empirical mass-radius relations
+    # so that the 4-component ESI exponent normalization (w_i / 4) remains invariant
+    # and does not artificially double the thermal penalty (fixing the 0.850 -> 0.759 drop).
+    if m is None and r is not None and r > 0:
+        m = (r ** 3.5) if r <= 1.5 else (r ** 2.06)
+
     available = []
 
     if r is not None and r > 0:
@@ -360,23 +367,44 @@ def score_age(age):
 def load_uncertainties():
     from pathlib import Path
     import pandas as pd
-    csv_path = PROJECT_ROOT / "planets_enriched_clean.csv"
-    if not csv_path.exists():
-        csv_path = PROJECT_ROOT / "planets_nasa_full.csv"
-    if not csv_path.exists():
+    candidates = [
+        PROJECT_ROOT / "planet_uncertainties.csv",
+        PROJECT_ROOT / "data" / "planet_uncertainties.csv",
+        PROJECT_ROOT / "planets_enriched_clean.csv",
+        PROJECT_ROOT / "planets_nasa_full.csv",
+    ]
+    csv_path = None
+    for p in candidates:
+        if p.exists():
+            csv_path = p
+            break
+    if not csv_path:
         return {}
-    df = pd.read_csv(csv_path, usecols=["pl_name", "pl_bmasseerr1", "pl_bmasseerr2", "pl_radeerr1", "pl_radeerr2"], low_memory=False)
-    errs = {}
-    for _, row in df.iterrows():
-        merr1 = abs(float(row["pl_bmasseerr1"])) if pd.notna(row["pl_bmasseerr1"]) else 0.0
-        merr2 = abs(float(row["pl_bmasseerr2"])) if pd.notna(row["pl_bmasseerr2"]) else merr1
-        rerr1 = abs(float(row["pl_radeerr1"])) if pd.notna(row["pl_radeerr1"]) else 0.0
-        rerr2 = abs(float(row["pl_radeerr2"])) if pd.notna(row["pl_radeerr2"]) else rerr1
-        errs[row["pl_name"]] = {"m_err": max(merr1, merr2), "r_err": max(rerr1, rerr2)}
-    return errs
+    try:
+        df = pd.read_csv(csv_path, low_memory=False)
+        name_col = "pl_name" if "pl_name" in df.columns else ("planet_name" if "planet_name" in df.columns else None)
+        if not name_col:
+            return {}
+        errs = {}
+        for _, row in df.iterrows():
+            pname = str(row[name_col])
+            if "pl_bmasseerr1" in row:
+                merr1 = abs(float(row["pl_bmasseerr1"])) if pd.notna(row["pl_bmasseerr1"]) else 0.0
+                merr2 = abs(float(row["pl_bmasseerr2"])) if pd.notna(row["pl_bmasseerr2"]) else merr1
+                rerr1 = abs(float(row["pl_radeerr1"])) if pd.notna(row["pl_radeerr1"]) else 0.0
+                rerr2 = abs(float(row["pl_radeerr2"])) if pd.notna(row["pl_radeerr2"]) else rerr1
+                errs[pname] = {"m_err": max(merr1, merr2), "r_err": max(rerr1, rerr2)}
+            elif "m_err" in row and "r_err" in row:
+                errs[pname] = {
+                    "m_err": float(row["m_err"]) if pd.notna(row["m_err"]) else 0.0,
+                    "r_err": float(row["r_err"]) if pd.notna(row["r_err"]) else 0.0
+                }
+        return errs
+    except Exception:
+        return {}
 
-# Global uncertainties cache
-UNCERTAINTIES = {}
+# Global uncertainties cache (loaded on import and refreshed if empty)
+UNCERTAINTIES = load_uncertainties()
 
 
 def weighted_average(scores: dict, weights: dict) -> float | None:
@@ -512,9 +540,13 @@ def score_planet(row: pd.Series) -> dict:
 
     if base["composite_score"] is not None:
         pname = row.get("planet_name")
+        if not UNCERTAINTIES:
+            UNCERTAINTIES.update(load_uncertainties())
         errs = UNCERTAINTIES.get(pname, {})
         m_err = errs.get("m_err", 0.0)
         r_err = errs.get("r_err", 0.0)
+        has_measured = (m_err > 0.0 or r_err > 0.0)
+        base["uncertainty_source"] = "measured" if has_measured else "default_30pct_fallback"
         
         import numpy as np
         pname_str = str(pname or "")

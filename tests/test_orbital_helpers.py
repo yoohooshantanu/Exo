@@ -12,8 +12,12 @@ import sys
 import pytest
 from unittest.mock import MagicMock
 
-# Mock rebound before importing the predictor module
-sys.modules["rebound"] = MagicMock()
+# Mock rebound only if not installed in the test environment
+try:
+    import rebound
+except ImportError:
+    from unittest.mock import MagicMock
+    sys.modules["rebound"] = MagicMock()
 
 from modules.orbital_gap_predictor import (
     get_mass_earth,

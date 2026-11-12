@@ -12,7 +12,7 @@ Exo is a modular exoplanet characterization and discovery prioritization platfor
 
 1. **Habitability Engine (`modules/habitability_scorer.py`)**: Computes physical similarity and environmental safety metrics across thermal equilibrium, stellar UV/X-ray exposure, planetary density, and orbital eccentricity.
 2. **Orbital Dynamics Engine (`modules/orbital_engine.py`)**: Evaluates dynamical stability, mean-motion resonance (MMR) proximity, and MEGNO ($\langle Y \rangle$) chaos indicators across multi-planet architectures.
-3. **Atmospheric / Biosignature Detector (`modules/biosignature_detector.py`)**: Performs molecular template cross-correlation against HITRAN linelists (e.g., $\text{H}_2\text{O}$, $\text{CO}_2$, $\text{CH}_4$, $\text{O}_3$, $\text{SO}_2$, $\text{NH}_3$, $\text{N}_2\text{O}$). Reports raw unadulterated OLS significance ($\sigma$), Šidák multiple-testing corrected significance across candidate molecule trials ($\alpha_{\text{corrected}} = 1 - (1 - \alpha)^{1/M}$), and flags heuristic contextual adjustments separately.
+3. **Atmospheric / Biosignature Detector (`modules/biosignature_detector.py`)**: Performs molecular template cross-correlation against HITRAN linelists (e.g., $\text{H}_2\text{O}$, $\text{CO}_2$, $\text{CH}_4$, $\text{O}_3$, $\text{SO}_2$, $\text{NH}_3$, $\text{N}_2\text{O}$). Applies Generalized Least Squares (Prais-Winsten AR(1)) to de-correlate red noise and detector systematics. Enforces strict Šidák multiple-testing corrected significance across the $M=7$ candidate molecule search space ($\alpha_{\text{corrected}} = 1 - (1 - \alpha)^{1/M}$) to govern tier classification (`screening_candidate` requires $\sigma_{\text{trials}} \ge 3.0$ and $\ge 3$ peaks; `marginal` requires $\sigma_{\text{trials}} \ge 2.0$ and $\ge 2$ peaks).
 4. **Spectral Retrieval Pipeline (`modules/atmospheric_retrieval.py`)**: Forward-models transmission spectroscopy and performs atmospheric property estimation.
 5. **Multi-Criteria Planetary Prioritization (`modules/discovery_scorer.py`)**: Decouples operational observability (transit depth, host brightness, geometric probability) from intrinsic physical triage to prevent circularity in target allocation.
 6. **Data Quality & Anomaly Detection (`modules/anomaly_detector.py`)**: Flags astrophysical outliers, physical constraint violations, and observation artifacts.
@@ -60,6 +60,8 @@ Exo evaluates its pipelines against four database-backed validation tracks recor
 1. **Target Selection Context**: JWST telescope allocations reflect Telescope Allocation Committee (TAC) scheduling feasibility, instrumentation constraints, host star brightness, and proposal interest. They are an operational benchmark for detection capture, not ground truth for biological habitability.
 2. **Simplified Atmospheric Chemistry**: 1D forward-model retrievals assume clear-sky or parameterized aerosol decks; photochemical equilibrium and 3D global circulation (GCM) dynamics require dedicated follow-up modeling.
 3. **Stellar Activity Assumptions**: Flare frequency, coronal mass ejections (CMEs), and extreme ultraviolet (XUV) history are estimated from stellar type and rotation approximations where direct high-energy monitoring is unavailable.
+4. **Resonant Chain Phase Sensitivity in Orbital Retrodiction**: The orbital gap engine evaluates dynamically permitted niches via circular phase-blind test particle injection and REBOUND MEGNO integration. While this successfully recovers regular quasi-periodic motion in well-spaced non-resonant systems (such as the Sun-Venus-Mars gap with Earth masked, $\langle Y \rangle \le 2.2$), phase-blind insertion into tightly packed multi-body resonant chains (such as TRAPPIST-1) breaks the delicate Laplace resonant libration angles, yielding MEGNO $> 4.0$ (unstable). Resonant architectures require dedicated three-body resonant angle search.
+5. **Correlated Systematics in Transmission Spectroscopy**: Uncorrected correlated (red) noise inflates ordinary least-squares significance. Exo mitigates this via Prais-Winsten AR(1) prewhitening and strictly gates detection tiers on trials-corrected significance across the 7-molecule hypothesis space.
 
 ---
 
@@ -69,7 +71,7 @@ Exo evaluates its pipelines against four database-backed validation tracks recor
 ```bash
 pytest
 ```
-*Current test suite result: 182 passed, 0 failures.*
+*Current test suite result: 184 passed, 0 failures.*
 
 ### Recording Live Validation Runs
 ```bash
