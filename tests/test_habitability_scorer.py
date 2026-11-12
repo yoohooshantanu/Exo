@@ -4,7 +4,6 @@ Tests for modules/habitability_scorer.py
 Covers: ESI formula, individual score functions, composite scoring,
 risk weighting, and edge cases (None inputs, zero values, boundary conditions).
 """
-import math
 import pytest
 
 from modules.habitability_scorer import (
@@ -21,7 +20,6 @@ from modules.habitability_scorer import (
     derive_teq,
     weighted_average,
     p_rocky,
-    SAFETY_PRIORS,
     ESI_EXPONENTS,
     TEQ_REF_K,
     RISK_WEIGHTS,

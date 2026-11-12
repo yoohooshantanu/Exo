@@ -25,7 +25,6 @@ import requests
 import pandas as pd
 import numpy as np
 from io import StringIO
-from datetime import datetime, timezone
 from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker

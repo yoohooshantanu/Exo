@@ -22,15 +22,12 @@ Scientific Methodology & Limitations:
    95% CI within [0.70, 1.45]), rather than claiming strict orthogonality.
 """
 import os
-import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from sqlalchemy import create_engine
 import dotenv
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 
 def _get_csv_path() -> Path:

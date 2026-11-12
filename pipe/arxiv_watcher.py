@@ -17,7 +17,6 @@ Run daily via Prefect schedule (wired up in scheduler.py).
 Safe to re-run — skips papers already in database by arxiv_id.
 """
 
-import os
 import re
 import sys
 import time

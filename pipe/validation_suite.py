@@ -17,7 +17,6 @@ Or called from other pipelines:
   passed, report = run_validation(session)
 """
 
-import os
 import sys
 from datetime import datetime, timezone
 from dataclasses import dataclass, field

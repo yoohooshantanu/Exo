@@ -5,7 +5,6 @@ Covers: Zeng composition curves, distance_to_composition calculations,
 null handling, and physical boundary conditions.
 """
 import math
-import pytest
 
 from modules.anomaly_detector import (
     zeng_pure_iron,

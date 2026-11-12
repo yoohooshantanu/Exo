@@ -15,7 +15,7 @@ Run:
   python modules/taxonomy_engine.py --min-cluster-size 50
 """
 
-import os, sys, io, uuid, math, argparse, json
+import sys, io, uuid, argparse
 import numpy as np
 import pandas as pd
 from pathlib import Path

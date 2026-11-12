@@ -18,7 +18,6 @@ Run:
   python modules/spectra_ingestor.py --dry-run               # preview only
 """
 
-import os
 import re
 import uuid
 import argparse

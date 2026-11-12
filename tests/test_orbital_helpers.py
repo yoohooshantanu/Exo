@@ -7,14 +7,13 @@ we mock it before importing the module.
 Covers: mass estimation, semi-major axis derivation, mutual Hill radius,
 and the M_EARTH_TO_SOLAR conversion constant.
 """
-import math
 import sys
 import pytest
 from unittest.mock import MagicMock
 
 # Mock rebound only if not installed in the test environment
 try:
-    import rebound
+    import rebound  # noqa: F401
 except ImportError:
     from unittest.mock import MagicMock
     sys.modules["rebound"] = MagicMock()

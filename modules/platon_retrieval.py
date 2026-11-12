@@ -5,8 +5,7 @@ A background worker module for running full Bayesian atmospheric retrievals
 using PLATON (PLanetary Atmospheric Tool for Observer Noobs).
 """
 
-import os, json, math, uuid
-import numpy as np
+import json, uuid
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,7 +18,7 @@ from dotenv import load_dotenv
 
 try:
     from platon.retriever import CombinedRetriever
-    from platon.constants import R_sun, R_jup, M_jup, R_earth, M_earth
+    from platon.constants import R_jup, M_jup, R_earth, M_earth
 except ImportError:
     CombinedRetriever = None
 

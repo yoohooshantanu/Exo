@@ -4,7 +4,6 @@ Tests for modules/biosignature_detector.py
 Covers: classify_detection logic, abiotic reasoning, stellar contamination
 penalties, instrument weighting, tier classification, and constants integrity.
 """
-import pytest
 
 from modules.biosignature_detector import (
     unmix_spectrum,
@@ -12,12 +11,8 @@ from modules.biosignature_detector import (
     CONFIRMED_SIGMA,
     MARGINAL_SIGMA,
     TRIPLE_BIOSIG,
-    DISEQ_PAIR,
-    ABIOTIC_MOLECULES,
     TARGET_MOLECULES,
     MOL_BAND_CENTERS,
-    INSTRUMENT_WEIGHTS,
-    STELLAR_CONTAM_RISK,
 )
 
 

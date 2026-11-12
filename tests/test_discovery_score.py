@@ -38,8 +38,6 @@ class TestComputeDataQualityComponent:
 
 class TestDiscoveryScoreMigration:
     def test_migration_uses_correct_habitability_version(self):
-        import importlib.util
-        from modules.config import HABITABILITY_MODEL_VERSION
         from pathlib import Path
         
         project_root = Path(__file__).resolve().parent.parent

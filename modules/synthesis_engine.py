@@ -15,8 +15,7 @@ Run:
   python modules/synthesis_engine.py --dry-run
 """
 
-import os, sys, io, uuid, argparse
-import numpy as np
+import sys, io, argparse
 import pandas as pd
 from pathlib import Path
 from datetime import datetime, timezone

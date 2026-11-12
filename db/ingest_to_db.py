@@ -13,7 +13,6 @@ Requires:
   DATABASE_URL in .env     — postgresql://user:pass@host:5432/dbname
 """
 
-import os
 import sys
 import uuid
 import numpy as np

@@ -1,4 +1,4 @@
-import os, sys, urllib.request, json, uuid
+import sys, urllib.request, json, uuid
 from datetime import datetime, timezone
 from pathlib import Path
 import math

@@ -19,7 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import queries as q
-from api.db import AsyncSessionLocal, get_db
+from api.db import get_db
 from api.models import (
     AlertItem,
     AtmosphericRetrievalItem,

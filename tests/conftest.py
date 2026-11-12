@@ -21,7 +21,7 @@ def pytest_configure(config):
 
     # Mock heavy native dependencies only if not installed in the test env
     try:
-        import rebound
+        import rebound  # noqa: F401
     except ImportError:
         sys.modules["rebound"] = MagicMock()
 
@@ -46,7 +46,7 @@ def pytest_configure(config):
 
     # Ensure slowapi doesn't block tests — mock the limiter to be a no-op
     try:
-        import slowapi
+        import slowapi  # noqa: F401
     except ImportError:
         # slowapi not installed — create a stub so api/main.py can import it
         mock_slowapi = MagicMock()

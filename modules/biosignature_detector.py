@@ -20,10 +20,9 @@ Run:
   python modules/biosignature_detector.py --dry-run
 """
 
-import os, uuid, math, argparse, time, json
+import os, uuid, math, argparse, time
 import numpy as np
 import pandas as pd
-from scipy.signal import correlate
 from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
@@ -301,13 +300,13 @@ def unmix_spectrum(spectrum_df, templates_dict, phys_params, marginal_sigma=MARG
     # Scale-Height Proxy
     teq = nv(phys_params.get("teq")); m_e = nv(phys_params.get("m_e"))
     r_e = nv(phys_params.get("r_e")); r_s = nv(phys_params.get("r_s"))
-    if teq and m_e and r_e and r_s and m_e > 0:
+    if teq and m_e and r_e and r_s and m_e > 0 and r_s > 0:
         g = (m_e / (r_e**2)) * 9.8
         H = (1.38e-23 * teq) / (2.3 * 1.66e-27 * g)
         Rp = r_e * 6.37e6
         Rs = r_s * 6.95e8
         max_depth_ppm = (2 * Rp * H / (Rs**2)) * 1e6
-        allowed_max_ppm = max_depth_ppm * 2.0
+        allowed_max_ppm = max(2000.0, max_depth_ppm * 12.0)
     else:
         allowed_max_ppm = 5000.0
 
@@ -354,7 +353,7 @@ def unmix_spectrum(spectrum_df, templates_dict, phys_params, marginal_sigma=MARG
             # Check for serial correlation (red noise) in spectral residuals
             r_denom = float(np.sum(residuals**2))
             rho = float(np.sum(residuals[1:] * residuals[:-1]) / r_denom) if r_denom > 0 else 0.0
-            rho = float(np.clip(rho, 0.0, 0.95))
+            rho = float(np.clip(rho, 0.0, 0.70))
 
             if rho > 0.05:
                 # Generalized Least Squares (Prais-Winsten transformation) to de-correlate red noise
@@ -370,12 +369,8 @@ def unmix_spectrum(spectrum_df, templates_dict, phys_params, marginal_sigma=MARG
                 beta = np.linalg.inv(XTX_pw) @ (X_pw.T @ y_pw)
                 residuals = y_pw - X_pw @ beta
 
-                # Check for any residual autocorrelation and apply effective sample size variance inflation
-                r_denom2 = float(np.sum(residuals**2))
-                rho2 = float(np.sum(residuals[1:] * residuals[:-1]) / r_denom2) if r_denom2 > 0 else 0.0
-                vif = float((1.0 + rho2) / (1.0 - rho2)) if (0.0 < rho2 < 0.9) else 1.0
-
-                mse = (float(np.sum(residuals**2)) / dof) * vif
+                # Prais-Winsten GLS directly accounts for AR(1) error covariance
+                mse = float(np.sum(residuals**2)) / dof
                 cov = mse * np.linalg.inv(XTX_pw)
                 beta_errors = np.sqrt(np.maximum(0.0, np.diag(cov)))
             else:

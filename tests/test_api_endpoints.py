@@ -4,7 +4,6 @@ Tests for API endpoints using FastAPI's TestClient.
 Mocks the database session so tests run without a live PostgreSQL instance.
 Tests verify HTTP status codes, response shapes, query parameters, and error handling.
 """
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 

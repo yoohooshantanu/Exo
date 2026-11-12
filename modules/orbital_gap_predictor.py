@@ -31,9 +31,8 @@ import argparse
 import time
 from pathlib import Path
 from datetime import datetime, timezone
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 import numpy as np
-import pandas as pd
 import rebound
 from dotenv import load_dotenv
 from sqlalchemy import text

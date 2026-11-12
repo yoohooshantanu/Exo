@@ -12,7 +12,6 @@ broadening and instrument resolution binning, and save them as lightning-fast .p
 files for the runtime engine.
 """
 
-import os
 import uuid
 import math
 import argparse

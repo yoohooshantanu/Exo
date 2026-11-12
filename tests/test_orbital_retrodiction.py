@@ -8,8 +8,6 @@ Specifically documents and tests:
 2. Retrodiction success on well-spaced non-resonant architectures: phase-blind integration
    successfully recovers regular quasi-periodic motion (<Y> <= 2.2).
 """
-import pytest
-import math
 from modules.orbital_gap_predictor import run_megno, mutual_hill_radius
 
 M_EARTH_TO_SOLAR = 3.003e-6
@@ -120,3 +118,50 @@ class TestOrbitalRetrodiction:
         d = abs(test_a - p_jupiter_a) / r_h
         # Must fail Gladman stability threshold (< 3.46 mutual Hill radii)
         assert d < 3.46, f"Separation d={d:.2f} inside Hill sphere must fail Gladman stability criterion"
+
+    def test_negative_control_unstable_orbit_in_gap(self):
+        """
+        Negative control test for the orbital screen in the Venus-Mars gap:
+        Demonstrates that an unstable test particle (placed adjacent to Venus's Hill sphere at a=0.74 AU
+        or near Mars at a=1.48 AU) is rejected by the N-body MEGNO screen (<Y> > 4.0, unstable),
+        proving that the screen discriminates between viable orbits and dynamical chaos.
+        """
+        m_star = 1.0
+        masked_planets = [
+            {"a": 0.723, "m": 0.815 * M_EARTH_TO_SOLAR, "m_e": 0.815, "ecc": 0.007},
+            {"a": 1.524, "m": 0.107 * M_EARTH_TO_SOLAR, "m_e": 0.107, "ecc": 0.093},
+        ]
+        # Candidate placed at 0.74 AU (encroaching Venus)
+        is_stable_inner, megno_inner, _, status_inner = run_megno(
+            m_star=m_star,
+            planets=masked_planets,
+            test_a=0.74,
+            test_m_solar=1.0 * M_EARTH_TO_SOLAR,
+            fast=True,
+            seed=42,
+        )
+        assert is_stable_inner is False, f"Orbit at 0.74 AU must be flagged unstable (got {status_inner})"
+        assert megno_inner > 4.0, f"MEGNO for chaotic orbit must exceed 4.0 (got {megno_inner})"
+
+        # Candidate placed at 1.48 AU (encroaching Mars)
+        is_stable_outer, megno_outer, _, status_outer = run_megno(
+            m_star=m_star,
+            planets=masked_planets,
+            test_a=1.48,
+            test_m_solar=1.0 * M_EARTH_TO_SOLAR,
+            fast=True,
+            seed=42,
+        )
+        assert is_stable_outer is False, f"Orbit at 1.48 AU must be flagged unstable (got {status_outer})"
+        assert megno_outer > 4.0, f"MEGNO for chaotic orbit must exceed 4.0 (got {megno_outer})"
+
+    def test_rebound_real_module_installed(self):
+        """
+        Verify that rebound is a genuine compiled N-body simulation package (not a Mock),
+        ensuring CI tests execute real physics integrations rather than passing vacuously.
+        """
+        import rebound
+        from unittest.mock import Mock, MagicMock
+        assert not isinstance(rebound, (Mock, MagicMock)), "rebound must not be a mock in CI/testing"
+        assert hasattr(rebound, "Simulation"), "rebound must provide Simulation class"
+

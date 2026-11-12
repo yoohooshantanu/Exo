@@ -14,7 +14,7 @@ Run:
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID
 
 revision      = "0005"
 down_revision = "0004"

@@ -18,7 +18,7 @@ Run:
   python modules/anomaly_detector.py --type density
 """
 
-import os, sys, io, uuid, math, argparse
+import sys, io, uuid, math, argparse
 import numpy as np
 import pandas as pd
 from pathlib import Path

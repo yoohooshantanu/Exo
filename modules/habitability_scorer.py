@@ -21,13 +21,13 @@ composite_score = 0.70 * similarity_score + 0.30 * safety_score
 Model version: 5.0.0
 """
 
-import os, sys, math, uuid, json, hashlib
+import sys, math, uuid, json, hashlib
 import numpy as np
 import pandas as pd
 from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text, update
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.postgresql import insert
 
@@ -365,7 +365,6 @@ def score_age(age):
     return float(max(0.0, 1.0 - (activity - 0.2) / 2.8 * 0.9))
 
 def load_uncertainties():
-    from pathlib import Path
     import pandas as pd
     candidates = [
         PROJECT_ROOT / "planet_uncertainties.csv",
@@ -505,6 +504,8 @@ def _compute_score_planet(row: pd.Series) -> dict:
             "a_au": a_au, "lum_log": lum_log, "period_days": period,
             "mstar": mstar, "teff_k": teff, "eccentricity": ecc,
             "radius_earth": rade, "mass_earth": masse, "teq_k": teq, "age_gyr": age,
+            "is_imputed": (masse is None and rade is not None),
+            "mass_imputed": (masse is None and rade is not None),
         },
         "esi_components": esi_detail,
         "safety":       {k: round(v, 4) if v is not None else None for k, v in raw_safety.items()},
@@ -536,6 +537,7 @@ def score_planet(row: pd.Series) -> dict:
     is_imputed = (masse is None and rade is not None)
 
     base["is_imputed"] = is_imputed
+    base["mass_imputed"] = is_imputed
     base["composite_score_iqr"] = None
 
     if base["composite_score"] is not None:
