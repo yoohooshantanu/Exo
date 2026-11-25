@@ -44,10 +44,9 @@ Physical · Observability · Characterization"]
 
 A quick guide for researchers reviewing the platform:
 
-* 🌐 **Live Web Application**: [exo-five-orcin.vercel.app](https://exo-five-orcin.vercel.app)
-* 📖 **Scientific Methodology & Reproducibility**: [`METHODOLOGY.md`](METHODOLOGY.md)
-* 📡 **Interactive REST API Docs**: [`http://localhost:8000/docs`](http://localhost:8000/docs)
-* 🏷️ **Release & Audit**: Tag `v1.0.0-review` (Git commit [`3edaf04`](https://github.com/yoohooshantanu/Exo/commit/3edaf0499dc8e392da2a9318088e34c7f68cceee))
+* 🌐 **Live Interactive Observatory**: [exo-five-orcin.vercel.app](https://exo-five-orcin.vercel.app)
+* 📖 **Scientific Methodology & Reproducibility Guide**: [`METHODOLOGY.md`](METHODOLOGY.md)
+* 🏷️ **Release & Audit Provenance**: [`v1.0.0-review`](https://github.com/yoohooshantanu/Exo/tree/v1.0.0-review)
 * 🧪 **Automated Test Suite**: 187 tests passing (`pytest`) with genuine compiled N-body REBOUND integrations.
 
 ### How the Decoupled Indices Work in Practice
@@ -56,12 +55,12 @@ Rather than blending habitability and telescope observation history into a circu
 
 | Target | Physical Triage ($0-100$) | Observability ($0-100$) | Characterization ($0-100$) | Triage Interpretation |
 | :--- | :---: | :---: | :---: | :--- |
-| **Earth** *(Control)* | **100.0** | **N/A** | **N/A** | Ground truth reference baseline; $P_{	ext{rocky}} = 0.95$, ideal thermal equilibrium. |
-| **TRAPPIST-1 e** | **95.4** | **46.8** | **28.0** | **Prime Astrobiological Candidate:** Near-Earth density, rocky surface ($P_{	ext{rocky}} = 0.95$), conservative HZ, but modest transmission SNR requires deep transit stacking on JWST. |
-| **K2-18 b** | **32.1** | **72.4** | **45.0** | **High-SNR Atmospheric Laboratory:** Sub-Neptune / Hycean candidate ($R_p = 2.61\,R_\oplus, P_{	ext{rocky}} = 0.0$); suppressed physical habitability, but exceptionally bright transit depth for transmission spectroscopy. |
-| **Jupiter** *(Control)* | **0.0** | **N/A** | **N/A** | Negative control; gas giant lacking solid surface ($P_{	ext{rocky}} = 0.0$). |
+| **Earth** *(Control)* | **100.0** | **N/A** | **N/A** | Ground truth reference baseline; $P_{\text{rocky}} = 0.95$, ideal thermal equilibrium. |
+| **TRAPPIST-1 e** | **95.4** | **46.8** | **28.0** | **Prime Astrobiological Candidate:** Near-Earth density, rocky surface ($P_{\text{rocky}} = 0.95$), conservative HZ, but modest transmission SNR requires deep transit stacking on JWST. |
+| **K2-18 b** | **32.1** | **72.4** | **45.0** | **High-SNR Atmospheric Laboratory:** Sub-Neptune / Hycean candidate ($R_p = 2.61\,R_\oplus, P_{\text{rocky}} = 0.0$); suppressed physical habitability, but exceptionally bright transit depth for transmission spectroscopy. |
+| **Jupiter** *(Control)* | **0.0** | **N/A** | **N/A** | Negative control; gas giant lacking solid surface ($P_{\text{rocky}} = 0.0$). |
 
-1. **Physical Triage ($0-100$)**: Intrinsic habitability and terrestrial surface likelihood prior to observation bias ($P_{	ext{rocky}}$, XUV survival, thermal equilibrium).
+1. **Physical Triage ($0-100$)**: Intrinsic habitability and terrestrial surface likelihood prior to observation bias ($P_{\text{rocky}}$, XUV survival, thermal equilibrium).
 2. **Observability ($0-100$)**: Geometric transit SNR proxy measuring feasibility of spectroscopic detection ($\delta / d^2$).
 3. **Characterization ($0-100$)**: Post-observation archival coverage and candidate spectral line matches.
 
@@ -542,10 +541,10 @@ docker-compose exec api python modules/synthesis_engine.py
 docker-compose exec api python validation/record_validation_run.py
 ```
 
-| Endpoint | URL |
+| Local Service (Docker) | URL |
 |:---|:---|
-| API docs (Swagger) | [`http://localhost:8000/docs`](http://localhost:8000/docs) |
-| Interactive dashboard | [`http://localhost:5173`](http://localhost:5173) |
+| Local API docs (Swagger) | [`http://localhost:8000/docs`](http://localhost:8000/docs) |
+| Local dashboard | [`http://localhost:5173`](http://localhost:5173) |
 
 ---
 
