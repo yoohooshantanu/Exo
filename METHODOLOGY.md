@@ -71,7 +71,7 @@ Exo evaluates its pipelines against four database-backed validation tracks recor
 ```bash
 pytest
 ```
-*Current test suite result: 184 passed, 0 failures.*
+*Current test suite result: 187 passed, 0 failures.*
 
 ### Recording Live Validation Runs
 ```bash
