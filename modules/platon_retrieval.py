@@ -35,13 +35,14 @@ from dotenv import load_dotenv
 
 try:
     from platon.retriever import CombinedRetriever
-    from platon.constants import R_jup, M_jup, R_earth, M_earth
+    from platon.constants import R_jup, M_jup, R_earth, M_earth, R_sun
 except ImportError:
     CombinedRetriever = None
     R_jup = 7.1492e7
     M_jup = 1.898e27
     R_earth = 6.3781e6
     M_earth = 5.972e24
+    R_sun = 6.957e8
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
@@ -136,15 +137,37 @@ def resolve_retrieval_physical_parameters(
     if is_valid_num(eq_temperature_k):
         teq = float(eq_temperature_k)
         provenance["eq_temperature_k"] = "catalog"
+        provenance["eq_temperature_assumptions"] = {
+            "source": "catalog",
+            "bond_albedo": "archival_catalog_default",
+            "heat_redistribution": "archival_catalog_default",
+            "notes": "Direct archival catalogue value; specific albedo and recirculation parameters governed by source discovery paper.",
+        }
     elif teff is not None and is_valid_num(radius_solar) and is_valid_num(semi_major_axis_au):
         # 1 R_sun in AU = 0.00465047 AU
         # Teq = Teff * sqrt(R_*_au / (2 * a_au))
+        # Physical assumptions:
+        # 1. Zero Bond albedo (A_B = 0.0) -> maximum absorbed incident stellar flux.
+        # 2. Uniform full-sphere 4pi steradian heat redistribution (f = 1/4 factor in Teq = Teff * sqrt(R_* / 2a)).
+        # 3. Blackbody emissivity epsilon = 1.0 without greenhouse warming or atmospheric circulation models.
+        # 4. Circular orbit approximation at semi-major axis (neglecting orbital eccentricity).
+        # 5. Zero internal heat flux (tidal or radiogenic).
         r_s_au = float(radius_solar) * 0.00465047
         sma = float(semi_major_axis_au)
         derived_teq = teff * math.sqrt(r_s_au / (2.0 * sma))
         if derived_teq > 0 and not math.isnan(derived_teq):
             teq = float(derived_teq)
             provenance["eq_temperature_k"] = "derived_equilibrium_zero_albedo"
+            provenance["eq_temperature_assumptions"] = {
+                "source": "derived",
+                "bond_albedo": 0.0,
+                "heat_redistribution": "uniform_full_sphere_4pi (f = 1/4)",
+                "emissivity": 1.0,
+                "greenhouse_amplification": 0.0,
+                "internal_heating": 0.0,
+                "orbital_geometry": "circular_approximation_at_semi_major_axis",
+                "formula": "T_eq = T_eff * sqrt(R_* / (2 * a))",
+            }
         else:
             missing.append("eq_temperature_k")
     else:
@@ -234,11 +257,11 @@ def run_platon_retrieval(
             return
 
         planet_name = phys_row.planet_name
-        r_jup = resolved_params["radius_earth"] * (R_earth / R_jup)
-        m_jup = resolved_params["mass_earth"] * (M_earth / M_jup)
-        teq = resolved_params["eq_temperature_k"]
-        teff = resolved_params["teff_k"]
-        r_sun = resolved_params["radius_solar"]
+        r_p_m = float(resolved_params["radius_earth"]) * R_earth
+        m_p_kg = float(resolved_params["mass_earth"]) * M_earth
+        r_s_m = float(resolved_params["radius_solar"]) * R_sun
+        teq = float(resolved_params["eq_temperature_k"])
+        teff = float(resolved_params["teff_k"])
 
         # 3. Setup PLATON input data
         bins = []
@@ -260,49 +283,52 @@ def run_platon_retrieval(
             err_lo = abs(row.depth_err_lower) if row.depth_err_lower else 0
             err = (err_up + err_lo) / 2.0
             if err <= 0:
-                err = row.depth_ppm * 0.1
+                err = abs(row.depth_ppm) * 0.1
+
+            # Convert depth & error to unitless transit depth fraction (Rp/Rs)^2
+            d_val = float(row.depth_ppm)
+            e_val = float(err)
+            if abs(d_val) > 50.0:
+                # True parts-per-million (ppm) -> divide by 1e6
+                scale = 1e-6
+            elif abs(d_val) > 0.001:
+                # Percentage (%) -> divide by 100
+                scale = 1e-2
+            else:
+                # Direct fractional depth
+                scale = 1.0
 
             bins.append([wl_min_um * 1e-6, wl_max_um * 1e-6])
-            depths.append(row.depth_ppm * 1e-6)
-            errors.append(err * 1e-6)
+            depths.append(d_val * scale)
+            errors.append(e_val * scale)
 
-        # 4. Formulate explicit priors & bounds
+        # 4. Formulate explicit priors & bounds within physical & model grid ranges
+        # PLATON opacity grid temperature limits are strictly [200.0, 3000.0] K.
+        # Planetary radius prior bounds in SI meters.
+        rp_min_m = round(max(0.05 * R_jup, 0.5 * r_p_m), 1)
+        rp_max_m = round(min(3.0 * R_jup, 2.0 * r_p_m), 1)
+        if rp_min_m >= rp_max_m:
+            rp_min_m = round(r_p_m * 0.8, 1)
+            rp_max_m = round(r_p_m * 1.2, 1)
+
+        t_min = round(max(200.0, 0.5 * teq), 1)
+        t_max = round(min(3000.0, 2.0 * teq), 1)
+        if t_min >= t_max:
+            t_min = round(max(200.0, teq - 200.0), 1)
+            t_max = round(min(3000.0, teq + 200.0), 1)
+
         priors_dict = {
             "Rp": {
                 "distribution": "uniform",
-                "bounds": [round(0.5 * r_jup, 4), round(2.0 * r_jup, 4)],
-                "unit": "R_jup",
-                "description": "Planetary transit radius in Jupiter radii",
+                "bounds": [rp_min_m, rp_max_m],
+                "unit": "m",
+                "description": "Planetary transit radius in meters (SI)",
             },
             "T": {
                 "distribution": "uniform",
-                "bounds": [round(0.5 * teq, 1), round(2.0 * teq, 1)],
+                "bounds": [t_min, t_max],
                 "unit": "K",
                 "description": "Isothermal atmospheric temperature",
-            },
-            "logZ": {
-                "distribution": "uniform",
-                "bounds": [-1.0, 3.0],
-                "unit": "dex",
-                "description": "Atmospheric metallicity [M/H] relative to solar",
-            },
-            "CO_ratio": {
-                "distribution": "uniform",
-                "bounds": [0.1, 1.5],
-                "unit": "dimensionless",
-                "description": "Atmospheric Carbon to Oxygen elemental abundance ratio",
-            },
-            "log_cloudtop_P": {
-                "distribution": "uniform",
-                "bounds": [1.0, 5.0],
-                "unit": "log10(Pa)",
-                "description": "Opaque cloud top pressure",
-            },
-            "log_scat_factor": {
-                "distribution": "uniform",
-                "bounds": [-1.0, 3.0],
-                "unit": "log10(dimensionless)",
-                "description": "Rayleigh scattering enhancement factor",
             },
         }
 
@@ -318,7 +344,11 @@ def run_platon_retrieval(
             model_version="1.0.0",
             chemical_species=chemical_species,
             temperature_profile_type="isothermal",
-            temperature_params={"T_guess_k": teq, "derivation_provenance": param_prov.get("eq_temperature_k", "catalog")},
+            temperature_params={
+                "T_guess_k": teq,
+                "derivation_provenance": param_prov.get("eq_temperature_k", "catalog"),
+                "assumptions": param_prov.get("eq_temperature_assumptions", {}),
+            },
             priors=priors_dict,
             sampler_name="PyMultiNest",
             random_seed=random_seed,
@@ -358,26 +388,27 @@ def run_platon_retrieval(
         # NOTE: PRNG is initialized at the host Python/NumPy level for worker isolation,
         # but PLATON CombinedRetriever does NOT expose random seed control to the underlying
         # MultiNest C/Fortran library. Stochastic determinism cannot be guaranteed via the public API.
+        # Note: PYTHONHASHSEED is not set here because it is only read once by the Python
+        # runtime at interpreter initialization; modifying it inside a running process is ineffective.
         print(f"\n[PLATON] Starting Nested Sampling Retrieval for spec_id={spec_id} (Seed={random_seed} [API non-deterministic])")
         import numpy as np
-        import random, os
+        import random
         if random_seed is not None:
             np.random.seed(random_seed)
             random.seed(random_seed)
-            os.environ["PYTHONHASHSEED"] = str(random_seed)
 
         retriever = CombinedRetriever()
 
         fit_info = retriever.get_default_fit_info(
-            Rs=r_sun,
-            Mp=m_jup,
-            Rp=r_jup,
+            Rs=r_s_m,
+            Mp=m_p_kg,
+            Rp=r_p_m,
             T=teq,
             logZ=0.0,
             CO_ratio=0.53,
             log_cloudtop_P=5.0,
-            log_scat_factor=0.0,
-            scat_slope=4.0,
+            log_scatt_factor=0.0,
+            scatt_slope=4.0,
             error_multiple=1.0,
             T_star=teff
         )
@@ -388,21 +419,56 @@ def run_platon_retrieval(
         params_to_retrieve = list(priors_dict.keys())
 
         result = retriever.run_multinest(
-            bins=bins, depths=depths, errors=errors,
-            plot_best_fit=False,
-            nlive=nlive,
+            transit_bins=np.asarray(bins, dtype=float),
+            transit_depths=np.asarray(depths, dtype=float),
+            transit_errors=np.asarray(errors, dtype=float),
             eclipse_bins=None,
             eclipse_depths=None,
             eclipse_errors=None,
-            fit_info=fit_info
+            fit_info=fit_info,
+            nlive=nlive,
         )
 
-        best_fit_dict = {p: float(val) for p, val in zip(params_to_retrieve, result.x)} if hasattr(result, 'x') else {}
-        evidence_ln_z = float(result.logz[-1]) if (hasattr(result, 'logz') and len(result.logz) > 0) else None
-        evidence_err = float(result.logzerr[-1]) if (hasattr(result, 'logzerr') and len(result.logzerr) > 0) else None
+        dyn_res = getattr(result, "results", getattr(result, "result", result))
+        samples = result.samples.tolist() if hasattr(result, 'samples') else (dyn_res.samples.tolist() if hasattr(dyn_res, 'samples') else [])
 
-        samples = result.samples.tolist() if hasattr(result, 'samples') else []
-        weights = result.importance_weights().tolist() if hasattr(result, 'importance_weights') else []
+        if hasattr(result, 'final_logz') and result.final_logz is not None:
+            evidence_ln_z = float(result.final_logz)
+        elif hasattr(result, 'logz') and len(result.logz) > 0:
+            evidence_ln_z = float(result.logz[-1])
+        elif hasattr(dyn_res, 'logz') and len(dyn_res.logz) > 0:
+            evidence_ln_z = float(dyn_res.logz[-1])
+        else:
+            evidence_ln_z = None
+
+        if hasattr(result, 'logzerr') and len(result.logzerr) > 0:
+            evidence_err = float(result.logzerr[-1])
+        elif hasattr(dyn_res, 'logzerr') and len(dyn_res.logzerr) > 0:
+            evidence_err = float(dyn_res.logzerr[-1])
+        else:
+            evidence_err = None
+
+        if hasattr(result, 'weights') and result.weights is not None:
+            weights = np.asarray(result.weights).tolist()
+        elif hasattr(dyn_res, 'weights') and dyn_res.weights is not None:
+            weights = np.asarray(dyn_res.weights).tolist()
+        elif hasattr(dyn_res, 'logwt') and logz_arr is not None and len(logz_arr) > 0:
+            weights = np.exp(dyn_res.logwt - logz_arr[-1]).tolist()
+        else:
+            weights = []
+
+        if hasattr(result, 'logp') and len(result.logp) > 0 and len(samples) > 0:
+            best_idx = int(np.argmax(result.logp))
+            best_fit_dict = {p: float(samples[best_idx][i]) for i, p in enumerate(params_to_retrieve)}
+        elif hasattr(result, 'best_fit_params') and result.best_fit_params:
+            best_fit_dict = {p: float(val) for p, val in zip(params_to_retrieve, result.best_fit_params)}
+        elif hasattr(dyn_res, 'logl') and len(dyn_res.logl) > 0 and len(samples) > 0:
+            best_idx = int(np.argmax(dyn_res.logl))
+            best_fit_dict = {p: float(samples[best_idx][i]) for i, p in enumerate(params_to_retrieve)}
+        elif hasattr(result, 'x'):
+            best_fit_dict = {p: float(val) for p, val in zip(params_to_retrieve, result.x)}
+        else:
+            best_fit_dict = {}
 
         # 7. Evaluate convergence and reproducibility with Kish ESS and defensible criteria
         n_samples = len(samples)

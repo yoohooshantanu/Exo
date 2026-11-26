@@ -155,6 +155,14 @@ HZ_OUTER_SUN = 1.70
 BOND_ALBEDO  = 0.30   # Earth's Bond albedo — Stephens et al. (2015), Nat Geosci 8:580
 
 def derive_teq(a_au, lum_log=None, radius_solar=None, teff_k=None):
+    """
+    Derives planetary equilibrium temperature under Earth-analogue baseline assumptions:
+    - Bond albedo A_B = 0.30 (Stephens et al. 2015, Nat Geosci 8:580)
+    - Uniform full-sphere 4pi steradian heat redistribution (redistribution factor f = 1/4)
+    - Blackbody planetary emissivity epsilon = 1.0
+    - Circular orbit approximation at semi-major axis: S_eff = L_* / a^2
+    Formula: T_eq = 278.5 * (L_*^0.25) * (1 - A_B)^0.25 / sqrt(a)
+    """
     a = nv(a_au)
     if a is None or a <= 0: return None
     lum_res = resolve_stellar_luminosity(
