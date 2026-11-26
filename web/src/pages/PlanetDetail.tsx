@@ -96,7 +96,7 @@ export default function PlanetDetail() {
       .sort((a, b) => a.wavelength - b.wavelength)
   }, [spectrum])
 
-  const completedRetrievalId = retrievals?.find(r => r.status === 'completed')?.id
+  const completedRetrievalId = retrievals?.find(r => r.status === 'completed')?.retrieval_id || retrievals?.find(r => r.status === 'completed')?.id
 
   if (pError) {
     return (
@@ -744,7 +744,7 @@ export default function PlanetDetail() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <PosteriorPlots retrievalId={retrievals[0].retrieval_id} />
+            <PosteriorPlots retrievalId={retrievals[0].retrieval_id} retrieval={retrievals[0]} />
           </CardContent>
         </Card>
       )}

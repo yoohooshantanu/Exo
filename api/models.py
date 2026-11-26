@@ -1,6 +1,6 @@
 """Pydantic response models."""
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict
 
@@ -222,9 +222,20 @@ class AtmosphericRetrievalItem(BaseModel):
     spec_id: str
     model_name: str
     status: str
+    model_version: Optional[str] = None
+    reproducibility_status: Optional[str] = "configuration_recorded"
     run_time_seconds: Optional[float] = None
     best_fit_params: Optional[dict] = None
     evidence_ln_z: Optional[float] = None
+    configuration_record: Optional[Union[dict, list, Any]] = None
+    opacity_provenance: Optional[Union[dict, list, Any]] = None
+    sampler_name: Optional[str] = None
+    sampler_version: Optional[str] = None
+    random_seed: Optional[int] = None
+    sampler_parameters: Optional[Union[dict, list, Any]] = None
+    priors_record: Optional[Union[dict, list, Any]] = None
+    temperature_profile_record: Optional[Union[dict, list, Any]] = None
+    convergence_diagnostics: Optional[Union[dict, list, Any]] = None
     error_message: Optional[str] = None
     created_at: Optional[datetime] = None
 

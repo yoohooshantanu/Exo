@@ -721,3 +721,115 @@ class TestValidationIntegrityEndpoints:
         assert tracks["Historical JWST Selection Independence Analysis"]["inference_method"] == "cluster_robust"
 
         app.dependency_overrides.clear()
+
+
+# ── Atmospheric Retrieval Reproducibility Endpoints ─────────────────────────
+
+class TestAtmosphericRetrievalEndpoints:
+    def test_get_retrievals_returns_reproducibility_fields(self):
+        client, session, app = _get_test_client()
+
+        retrieval_mock = MagicMock()
+        retrieval_mock.mappings.return_value.all.return_value = [
+            {
+                "retrieval_id": "ret-test-uuid",
+                "planet_id": "p-wasp-39b",
+                "spec_id": "spec-prism-01",
+                "model_name": "PLATON_v1",
+                "model_version": "1.0.0",
+                "status": "completed",
+                "reproducibility_status": "reproducibility_verified",
+                "sampler_name": "PyMultiNest",
+                "sampler_version": "2.12",
+                "random_seed": 42,
+                "sampler_parameters": {"n_live_points": 500},
+                "configuration_record": {"retrieval_id": "ret-test-uuid", "model_name": "PLATON_v1"},
+                "opacity_provenance": [
+                    {
+                        "species": "H2O",
+                        "database": "ExoMol",
+                        "source_release": "2018",
+                        "line_list_or_file_id": "POKAZATEL",
+                        "provenance_verified": True,
+                    }
+                ],
+                "priors_record": [
+                    {
+                        "parameter": "Rp",
+                        "distribution": "uniform",
+                        "lower_bound": 0.5,
+                        "upper_bound": 2.5,
+                    }
+                ],
+                "temperature_profile_record": {"profile_type": "isothermal"},
+                "convergence_diagnostics": {
+                    "converged": True,
+                    "evidence_ln_z": -310.4,
+                    "evidence_err_ln_z": 0.12,
+                },
+                "posterior_file": "outputs/retrievals/ret-test-uuid_posterior.json",
+                "created_at": "2026-11-26T12:00:00Z",
+                "completed_at": "2026-11-26T12:05:00Z",
+            }
+        ]
+        session.execute.return_value = retrieval_mock
+
+        response = client.get("/api/planets/WASP-39%20b/spectra/spec-prism-01/retrievals")
+        assert response.status_code == 200
+        items = response.json()
+        assert len(items) == 1
+        item = items[0]
+        assert item["retrieval_id"] == "ret-test-uuid"
+        assert item["reproducibility_status"] == "reproducibility_verified"
+        assert item["sampler_name"] == "PyMultiNest"
+        assert item["random_seed"] == 42
+        assert len(item["opacity_provenance"]) == 1
+        assert item["opacity_provenance"][0]["species"] == "H2O"
+        assert item["convergence_diagnostics"]["converged"] is True
+
+        app.dependency_overrides.clear()
+
+    def test_get_retrieval_config_returns_json_attachment(self):
+        client, session, app = _get_test_client()
+
+        retrieval_mock = MagicMock()
+        retrieval_mock.mappings.return_value.one_or_none.return_value = {
+            "retrieval_id": "ret-download-test",
+            "planet_id": "p-1",
+            "spec_id": "s-1",
+            "model_name": "PLATON_v1",
+            "model_version": "1.0.0",
+            "status": "completed",
+            "reproducibility_status": "reproducibility_verified",
+            "configuration_record": {
+                "retrieval_id": "ret-download-test",
+                "model_name": "PLATON_v1",
+                "model_version": "1.0.0",
+                "sampler": {"sampler_name": "PyMultiNest", "random_seed": 42},
+                "species_opacity_provenance": [{"species": "CO2", "database": "ExoMol"}],
+            },
+        }
+        session.execute.return_value = retrieval_mock
+
+        response = client.get("/api/retrievals/ret-download-test/config")
+        assert response.status_code == 200
+        assert "application/json" in response.headers["content-type"]
+        assert 'attachment; filename="retrieval_config_ret-download-test.json"' in response.headers["content-disposition"]
+        data = response.json()
+        assert data["retrieval_id"] == "ret-download-test"
+        assert data["sampler"]["random_seed"] == 42
+
+        app.dependency_overrides.clear()
+
+    def test_get_retrieval_config_404_when_not_found(self):
+        client, session, app = _get_test_client()
+
+        retrieval_mock = MagicMock()
+        retrieval_mock.mappings.return_value.one_or_none.return_value = None
+        session.execute.return_value = retrieval_mock
+
+        response = client.get("/api/retrievals/non-existent-id/config")
+        assert response.status_code == 404
+
+        app.dependency_overrides.clear()
+

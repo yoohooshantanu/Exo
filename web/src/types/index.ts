@@ -312,3 +312,65 @@ export interface StarSystemResponse {
   mass_solar: number | null
   planets: SystemPlanet[]
 }
+
+export interface OpacitySourceRecord {
+  species: string
+  database: string
+  source_release: string
+  line_list_or_file_id: string
+  wavelength_range_um?: [number, number] | null
+  temperature_range_k?: [number, number] | null
+  isotopologues?: string[]
+  line_wing_cutoff_cm1?: number | null
+  limitations_and_notes?: string
+  provenance_verified: boolean
+}
+
+export interface ParameterPrior {
+  parameter: string
+  distribution: string
+  lower_bound?: number | null
+  upper_bound?: number | null
+  mean?: number | null
+  std_dev?: number | null
+  description?: string
+}
+
+export interface ConvergenceDiagnostics {
+  converged: boolean
+  n_live_points?: number | null
+  n_samples?: number | null
+  evidence_ln_z?: number | null
+  evidence_err_ln_z?: number | null
+  max_log_likelihood?: number | null
+  gelman_rubin_r_hat?: number | null
+  effective_sample_size?: number | null
+  warnings?: string[]
+}
+
+export interface AtmosphericRetrieval {
+  id?: string
+  retrieval_id: string
+  spec_id: string
+  planet_id?: string
+  model_name: string
+  model_version?: string
+  status: 'running' | 'completed' | 'failed'
+  reproducibility_status:
+    | 'configuration_recorded'
+    | 'execution_completed'
+    | 'reproducibility_metadata_incomplete'
+    | 'convergence_not_established'
+    | 'reproducibility_verified'
+  sampler_name?: string
+  sampler_version?: string
+  random_seed?: number | null
+  sampler_parameters?: Record<string, any>
+  configuration_record?: Record<string, any>
+  opacity_provenance?: OpacitySourceRecord[]
+  priors_record?: ParameterPrior[]
+  temperature_profile_record?: Record<string, any>
+  convergence_diagnostics?: ConvergenceDiagnostics
+  created_at?: string
+  completed_at?: string
+}

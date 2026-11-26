@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import csv
 import io
 from fastapi.middleware.cors import CORSMiddleware
@@ -60,6 +60,7 @@ from modules.config import (
     RETRIEVAL_OUTPUT_DIR,
 )
 from modules.platon_retrieval import new_id
+from modules.retrieval_reproducibility import sanitize_legacy_retrieval_record
 from modules.discovery_score import compute_data_quality_component
 
 limiter = Limiter(key_func=get_remote_address)
@@ -748,7 +749,13 @@ async def get_retrievals(
         ORDER BY r.created_at DESC
     """), {"pname": planet_name, "sid": spec_id})).mappings().all()
 
-    return [AtmosphericRetrievalItem(**{**dict(r), "retrieval_id": str(r["retrieval_id"]), "spec_id": str(r["spec_id"])}) for r in rows]
+    items = []
+    for r in rows:
+        d = sanitize_legacy_retrieval_record(dict(r))
+        d["retrieval_id"] = str(d["retrieval_id"])
+        d["spec_id"] = str(d["spec_id"])
+        items.append(AtmosphericRetrievalItem(**d))
+    return items
 
 
 @app.post(
@@ -792,9 +799,11 @@ async def start_retrieval(
     retrieval_id = new_id()
     await session.execute(text("""
         INSERT INTO atmospheric_retrievals (
-            retrieval_id, planet_id, spec_id, model_name, status
+            retrieval_id, planet_id, spec_id, model_name, model_version, status,
+            reproducibility_status, sampler_name, random_seed
         ) VALUES (
-            :rid, :pid, :sid, 'PLATON_v1', 'running'
+            :rid, :pid, :sid, 'PLATON_v1', '1.0.0', 'running',
+            'configuration_recorded', 'PyMultiNest', 42
         )
     """), {"rid": retrieval_id, "pid": planet_id, "sid": spec_id})
     await session.commit()
@@ -810,10 +819,75 @@ async def start_retrieval(
         WHERE retrieval_id = :rid
     """), {"rid": retrieval_id})).mappings().one()
 
-    item = dict(created)
+    item = sanitize_legacy_retrieval_record(dict(created))
     item["retrieval_id"] = str(item["retrieval_id"])
     item["spec_id"] = str(item["spec_id"])
     return AtmosphericRetrievalItem(**item)
+
+
+@app.get("/api/retrievals/{retrieval_id}/config")
+async def get_retrieval_config(
+    retrieval_id: str,
+    session: AsyncSession = Depends(get_db),
+):
+    """Export the complete reproducible configuration record for an atmospheric retrieval as JSON."""
+    row = (await session.execute(text("""
+        SELECT * FROM atmospheric_retrievals
+        WHERE retrieval_id = :rid
+    """), {"rid": retrieval_id})).mappings().one_or_none()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Retrieval not found")
+
+    d = sanitize_legacy_retrieval_record(dict(row))
+    config = d.get("configuration_record")
+
+    if config:
+        return JSONResponse(
+            content=config,
+            headers={
+                "Content-Disposition": f'attachment; filename="retrieval_config_{retrieval_id}.json"'
+            }
+        )
+
+    # Check on disk
+    config_disk_path = RETRIEVAL_OUTPUT_DIR / f"{retrieval_id}_config.json"
+    if config_disk_path.is_file():
+        try:
+            with open(config_disk_path, "r", encoding="utf-8") as f:
+                disk_config = json.load(f)
+            return JSONResponse(
+                content=disk_config,
+                headers={
+                    "Content-Disposition": f'attachment; filename="retrieval_config_{retrieval_id}.json"'
+                }
+            )
+        except Exception:
+            pass
+
+    # Synthesize fallback configuration metadata record
+    fallback = {
+        "retrieval_id": str(d.get("retrieval_id", retrieval_id)),
+        "model_name": d.get("model_name", "PLATON_v1"),
+        "model_version": d.get("model_version", "unknown"),
+        "reproducibility_status": d.get("reproducibility_status", "reproducibility_metadata_incomplete"),
+        "sampler": {
+            "sampler_name": d.get("sampler_name", "PyMultiNest"),
+            "sampler_version": d.get("sampler_version", "unknown"),
+            "random_seed": d.get("random_seed"),
+            "parameters": d.get("sampler_parameters", {}),
+        },
+        "species_opacity_provenance": d.get("opacity_provenance", []),
+        "priors": d.get("priors_record", []),
+        "convergence_diagnostics": d.get("convergence_diagnostics", {}),
+        "notes": "Historical retrieval configuration synthesized from database record; full input snapshot incomplete."
+    }
+    return JSONResponse(
+        content=fallback,
+        headers={
+            "Content-Disposition": f'attachment; filename="retrieval_config_{retrieval_id}.json"'
+        }
+    )
 
 
 @app.get("/api/retrievals/{retrieval_id}/posterior")

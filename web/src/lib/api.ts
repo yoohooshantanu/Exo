@@ -79,10 +79,13 @@ export const api = {
     fetchJson<any>(`/api/planets/${encodeURIComponent(planetName)}/spectra/${encodeURIComponent(specId)}/retrieve`, undefined, { method: 'POST' }),
 
   getRetrievals: (planetName: string, specId: string) =>
-    fetchJson<any[]>(`/api/planets/${encodeURIComponent(planetName)}/spectra/${encodeURIComponent(specId)}/retrievals`),
+    fetchJson<import('@/types').AtmosphericRetrieval[]>(`/api/planets/${encodeURIComponent(planetName)}/spectra/${encodeURIComponent(specId)}/retrievals`),
 
   getPosterior: (retrievalId: string) =>
     fetchJson<any>(`/api/retrievals/${encodeURIComponent(retrievalId)}/posterior`),
+
+  getRetrievalConfigUrl: (retrievalId: string) =>
+    `/api/retrievals/${encodeURIComponent(retrievalId)}/config`,
 
   validationMetrics: () =>
     fetchJson<any>('/api/validation/metrics'),
