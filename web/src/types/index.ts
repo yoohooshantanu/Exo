@@ -38,12 +38,19 @@ export interface ProfileHabitability {
   incident_stellar_flux?: number
   incident_stellar_flux_err?: number
   flux_relative_to_earth?: number
+  flux_at_semi_major_axis?: number
+  flux_periastron?: number
+  flux_apastron?: number
+  is_circular_approximation?: boolean
   conservative_hz?: boolean
   optimistic_hz?: boolean
   hz_classification?: 'conservative' | 'optimistic' | 'too_hot' | 'too_cold' | 'unknown'
   prob_conservative?: number
   prob_optimistic?: number
   probability_calculable?: boolean
+  invalid_draw_fraction?: number
+  reference_mass_earth?: number
+  mass_reference_note?: string
   luminosity_solar?: number
   luminosity_source?: 'catalog' | 'derived' | 'unavailable'
   luminosity_err?: number

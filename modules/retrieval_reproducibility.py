@@ -28,6 +28,7 @@ Key principles:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import platform
 import sys
@@ -181,6 +182,90 @@ def get_known_opacity_provenance(species: str) -> Dict[str, Any]:
     }
 
 
+def compute_file_sha256(filepath: Union[str, Path]) -> Optional[str]:
+    """
+    Computes the SHA-256 cryptographic hash of a file on disk.
+    Returns None if the file does not exist, is not a file, or is unreadable.
+    """
+    try:
+        p = Path(filepath).resolve()
+        if not p.is_file():
+            return None
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            while chunk := f.read(65536):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
+
+
+def verify_runtime_opacity_file(
+    species: str,
+    file_path: Optional[Union[str, Path]] = None,
+    opacity_dir: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
+    """
+    Inspects runtime opacity file on disk to determine presence and calculate SHA-256 hash.
+    Decouples published literature citations from actual local binary verification.
+    """
+    known = get_known_opacity_provenance(species)
+    target_path: Optional[Path] = None
+
+    if file_path is not None:
+        target_path = Path(file_path).resolve()
+    elif opacity_dir is not None and known.get("file_identifier"):
+        target_path = (Path(opacity_dir) / known["file_identifier"]).resolve()
+
+    if target_path is not None and target_path.is_file():
+        sha256 = compute_file_sha256(target_path)
+        stat = target_path.stat()
+        disk_ver = {
+            "file_status": "verified_on_disk",
+            "file_path": str(target_path),
+            "sha256_checksum": sha256,
+            "file_size_bytes": stat.st_size,
+            "last_modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            "provenance_verified": True,
+        }
+    else:
+        disk_ver = {
+            "file_status": "file_not_found",
+            "file_path": str(target_path) if target_path else None,
+            "sha256_checksum": None,
+            "file_size_bytes": None,
+            "last_modified": None,
+            "provenance_verified": False,
+        }
+
+    result = dict(known)
+    result["disk_verification"] = disk_ver
+    result["runtime_file_verified"] = disk_ver["provenance_verified"]
+    return result
+
+
+def compute_kish_effective_sample_size(weights: Optional[Union[List[float], Any]]) -> Optional[float]:
+    """
+    Computes Kish's Effective Sample Size (ESS) for weighted posterior samples:
+        N_eff = (sum(w_i))^2 / sum(w_i^2)
+    Returns None if weights are empty, invalid, or sum to zero.
+    """
+    if weights is None:
+        return None
+    try:
+        w_list = [float(w) for w in weights if w is not None]
+    except (ValueError, TypeError):
+        return None
+    if not w_list:
+        return None
+    sum_w = sum(w_list)
+    sum_w_sq = sum(w * w for w in w_list)
+    if sum_w_sq <= 0.0 or sum_w <= 0.0:
+        return None
+    ess = (sum_w * sum_w) / sum_w_sq
+    return float(ess)
+
+
 @dataclass
 class OpacityProvenance:
     species: str
@@ -321,6 +406,8 @@ def create_retrieval_configuration(
     observation_type: str = "transmission",
     wavelength_range_um: Optional[Tuple[float, float]] = (0.8, 5.0),
     custom_opacities: Optional[Dict[str, Dict[str, Any]]] = None,
+    opacity_dir: Optional[Union[str, Path]] = None,
+    sampler_seed_deterministic: bool = False,
 ) -> ReproducibleRetrievalConfig:
     """
     Constructs a fully versioned, structured retrieval configuration record.
@@ -335,7 +422,7 @@ def create_retrieval_configuration(
         if custom_opacities and spec in custom_opacities:
             opacity_prov_map[spec] = custom_opacities[spec]
         else:
-            opacity_prov_map[spec] = get_known_opacity_provenance(spec)
+            opacity_prov_map[spec] = verify_runtime_opacity_file(spec, opacity_dir=opacity_dir)
 
     # 2. Build temperature profile config
     tp_config = {
@@ -374,6 +461,7 @@ def create_retrieval_configuration(
         "sampler_name": sampler_name,
         "sampler_version": "1.0",
         "random_seed": random_seed,
+        "seed_determinism_guaranteed": sampler_seed_deterministic,
         "nlive": nlive,
         "evidence_tolerance": 0.5,
         "sampling_efficiency": 0.8,
@@ -414,6 +502,7 @@ def create_retrieval_configuration(
 def evaluate_retrieval_reproducibility(
     config: ReproducibleRetrievalConfig,
     convergence_diagnostics: Optional[ConvergenceDiagnostics] = None,
+    require_disk_verification: bool = False,
 ) -> Tuple[str, List[str]]:
     """
     Evaluates whether an atmospheric retrieval meets scientific reproducibility standards.
@@ -422,8 +511,9 @@ def evaluate_retrieval_reproducibility(
       1. Sampler random seed exists and is deterministic.
       2. Model configuration and chemical species are specified.
       3. Opacity provenance is complete (database, version, line list documented for all species).
+         If require_disk_verification is True, checks presence and SHA-256 on disk.
       4. Priors and parameter bounds are specified.
-      5. Execution completed and convergence criteria were verified.
+      5. Execution completed and convergence criteria were verified (evidence_err, ESS, live threshold).
     """
     notes: List[str] = []
     is_incomplete = False
@@ -434,6 +524,11 @@ def evaluate_retrieval_reproducibility(
     if seed is None:
         notes.append("Sampler random seed missing: retrieval is non-deterministic.")
         is_incomplete = True
+
+    if config.sampler.get("seed_determinism_guaranteed") is False:
+        notes.append("Sampler engine does not guarantee deterministic seeding via API.")
+        if require_disk_verification:
+            is_incomplete = True
 
     # Check species and opacity
     if not config.chemical_species:
@@ -450,6 +545,12 @@ def evaluate_retrieval_reproducibility(
             notes.append(f"Opacity release version for {spec} is unknown.")
             is_incomplete = True
 
+        if require_disk_verification:
+            disk_ver = op_info.get("disk_verification", {})
+            if disk_ver.get("file_status") != "verified_on_disk" or not disk_ver.get("sha256_checksum"):
+                notes.append(f"Opacity binary for species {spec} is not verified on disk with SHA-256 hash.")
+                is_incomplete = True
+
     # Check priors
     if not config.priors:
         notes.append("Prior distributions and bounds are missing from configuration.")
@@ -460,6 +561,18 @@ def evaluate_retrieval_reproducibility(
         if not convergence_diagnostics.converged:
             notes.append("Sampler did not reach convergence criteria.")
             is_unconverged = True
+
+        if convergence_diagnostics.evidence_err is None:
+            notes.append("Evidence uncertainty is missing (null).")
+            is_unconverged = True
+        elif convergence_diagnostics.evidence_err > 0.5:
+            notes.append(f"Evidence uncertainty ({convergence_diagnostics.evidence_err:.3f}) exceeds tolerance (0.5).")
+            is_unconverged = True
+
+        if convergence_diagnostics.effective_sample_size is not None and convergence_diagnostics.effective_sample_size < 100.0:
+            notes.append(f"Effective sample size ({convergence_diagnostics.effective_sample_size:.1f}) is below minimum threshold (100.0).")
+            is_unconverged = True
+
         if convergence_diagnostics.warnings:
             notes.extend(convergence_diagnostics.warnings)
     else:

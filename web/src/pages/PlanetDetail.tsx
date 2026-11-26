@@ -354,7 +354,11 @@ export default function PlanetDetail() {
               </CardDescription>
             </div>
             <div className="flex gap-2">
-              {planet.habitability?.conservative_hz ? (
+              {planet.habitability?.hz_boundaries?.is_valid_range === false ? (
+                <Badge variant="outline" className="text-amber-500 border-amber-500/30 text-xs">
+                  Model Domain Exceeded ({planet.habitability.hz_boundaries.teff_k?.toFixed(0) ?? '—'} K)
+                </Badge>
+              ) : planet.habitability?.conservative_hz ? (
                 <Badge variant="default" className="bg-emerald-600 hover:bg-emerald-700 text-xs">
                   Conservative HZ
                 </Badge>
@@ -373,13 +377,19 @@ export default function PlanetDetail() {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="p-3 bg-secondary/15 rounded-md border">
-              <span className="text-xs text-muted-foreground block">Incident Stellar Flux (S_eff)</span>
+              <span className="text-xs text-muted-foreground block">
+                {planet.habitability?.is_circular_approximation === false ? 'Orbit-Averaged Flux ⟨S_eff⟩' : 'Incident Stellar Flux (S_eff)'}
+              </span>
               <span className="text-lg font-data font-medium">
                 {planet.habitability?.incident_stellar_flux != null
                   ? `${planet.habitability.incident_stellar_flux.toFixed(2)}${planet.habitability.incident_stellar_flux_err != null ? ` ± ${planet.habitability.incident_stellar_flux_err.toFixed(2)}` : ''} S⊕`
                   : '—'}
               </span>
-              <span className="text-[10px] text-muted-foreground block mt-1">Relative to Earth (L_* / a²)</span>
+              <span className="text-[10px] text-muted-foreground block mt-1">
+                {planet.habitability?.is_circular_approximation === false
+                  ? `Periastron: ${planet.habitability.flux_periastron?.toFixed(2) ?? '—'} S⊕ | Apastron: ${planet.habitability.flux_apastron?.toFixed(2) ?? '—'} S⊕`
+                  : 'Circular orbit approximation (L_* / a²)'}
+              </span>
             </div>
 
             <div className="p-3 bg-secondary/15 rounded-md border">

@@ -3,7 +3,9 @@ modules/habitable_zone.py
 
 Scientifically rigorous habitable-zone (HZ) assessment module.
 Implements the temperature-dependent incident stellar flux parameterisation
-from Kopparapu et al. (2013, 2014).
+from Kopparapu et al. (2013) for 1 Earth-mass planets, with orbital
+eccentricity dynamics, Stefan-Boltzmann luminosity derivation, and correlated
+Monte Carlo uncertainty propagation.
 
 References:
   - Kopparapu, R. K., Ramirez, R., Kasting, J. F., et al. (2013).
@@ -14,12 +16,14 @@ References:
     The Astrophysical Journal Letters, 787(2), L29. doi:10.1088/2041-8205/787/2/L29
 
 Scientific Principles:
-  1. Habitable-zone membership is a necessary but far from sufficient condition
-     for planetary habitability; it refers solely to the circumstellar region
-     where liquid water could theoretically be sustained on a rocky planet with
-     a suitable atmosphere (Kopparapu et al. 2013).
-  2. Incident stellar flux (S_eff = L_* / a^2) is used rather than equilibrium
-     temperature to avoid implicit, unverified albedo and emissivity assumptions.
+  1. Habitable-zone membership defines incident stellar flux limits where liquid
+     surface water could theoretically exist; it does not confirm habitability,
+     atmosphere presence, or surface water (Kopparapu et al. 2013).
+  2. Incident stellar flux is calculated accounting for orbital eccentricity:
+     - Orbit-averaged flux: <S_eff> = L_* / (a^2 * sqrt(1 - e^2))
+     - Periastron flux: S_peri = L_* / (a^2 * (1 - e)^2)
+     - Apastron flux: S_apo = L_* / (a^2 * (1 + e)^2)
+     - Semi-major axis flux: S_semi = L_* / a^2 (preserved for circular baseline)
   3. Stellar luminosity is derived from stellar radius and effective temperature
      via the Stefan-Boltzmann relation when unavailable in catalogues, with full
      provenance tracking ("catalog", "derived", "unavailable"). Solar defaults
@@ -30,17 +34,21 @@ Scientific Principles:
      is explicitly forbidden.
   5. Distance-based or midpoint-based scoring rewards are prohibited: planets
      are not inherently "more habitable" at the centre of the habitable zone.
-  6. Observational uncertainties are propagated via analytical error propagation
-     and Monte Carlo sampling to compute membership probabilities. When input
-     uncertainties are absent, probabilities are marked uncalculable rather than
-     manufactured.
+  6. Observational uncertainties are propagated via correlated Monte Carlo sampling:
+     when luminosity is derived, R_* and T_eff are sampled directly, preserving
+     their physical covariance in L_*. For temperature distributions crossing
+     model limits (>10% out of domain), probabilities are marked uncalculable.
+  7. Planetary mass context: Calculations adopt the 1.0 M_earth reference atmosphere
+     (Kopparapu et al. 2013 Table 3). Under Kopparapu et al. (2014), higher-mass
+     planets experience runaway greenhouse at ~5% lower stellar flux, while
+     sub-Earths (0.1 M_earth) can withstand ~4% higher flux before runaway.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple, Union
 import numpy as np
 
 # Nominal Solar constants (IAU 2015 Resolution B3 / Prsa et al. 2016)
@@ -98,6 +106,32 @@ KOPPARAPU_COEFFICIENTS: Dict[str, Dict[str, float]] = {
 }
 
 
+class IncidentFluxResult(NamedTuple):
+    """
+    Result container for incident stellar flux calculations.
+    Subclasses NamedTuple with custom __iter__ to maintain 100% backward compatibility
+    with callers unpacking `s_eff, s_eff_err = calculate_incident_flux(...)`.
+    """
+    flux_orbit_averaged: Optional[float]
+    flux_orbit_averaged_err: Optional[float]
+    flux_at_semi_major_axis: Optional[float] = None
+    flux_at_semi_major_axis_err: Optional[float] = None
+    flux_periastron: Optional[float] = None
+    flux_apastron: Optional[float] = None
+    is_circular_approximation: bool = True
+    eccentricity: Optional[float] = None
+    warnings: List[str] = []
+
+    def __iter__(self):
+        yield self.flux_orbit_averaged
+        yield self.flux_orbit_averaged_err
+
+    def __eq__(self, other):
+        if isinstance(other, tuple) and len(other) == 2:
+            return (self.flux_orbit_averaged, self.flux_orbit_averaged_err) == other
+        return tuple.__eq__(self, other)
+
+
 @dataclass
 class StellarLuminosityResult:
     luminosity_solar: Optional[float]
@@ -126,28 +160,42 @@ class HZBoundaries:
 
 @dataclass
 class HabitableZoneAssessment:
-    # Incident stellar flux (S_eff = L_* / a^2)
-    incident_stellar_flux: Optional[float]
-    incident_stellar_flux_err: Optional[float]
-    flux_relative_to_earth: Optional[float]
+    # Primary incident flux metrics
+    incident_stellar_flux: Optional[float]              # Orbit-averaged flux <S_eff> (or L/a^2 if circular)
+    incident_stellar_flux_err: Optional[float]          # Propagated uncertainty
+    flux_relative_to_earth: Optional[float]             # Matches incident_stellar_flux for backward compatibility
+    flux_at_semi_major_axis: Optional[float] = None     # S_semi = L / a^2
+    flux_periastron: Optional[float] = None             # S_peri = L / (a^2 * (1 - e)^2)
+    flux_apastron: Optional[float] = None               # S_apo = L / (a^2 * (1 + e)^2)
+    eccentricity: Optional[float] = None                # Orbital eccentricity
+    is_circular_approximation: bool = True              # True if e is None or e == 0
 
     # Stellar luminosity context
-    luminosity_solar: Optional[float]
-    luminosity_source: str  # "catalog", "derived", or "unavailable"
-    luminosity_err: Optional[float]
+    luminosity_solar: Optional[float] = None
+    luminosity_source: str = "unavailable"  # "catalog", "derived", or "unavailable"
+    luminosity_err: Optional[float] = None
 
     # Discrete classification
-    conservative_hz: bool
-    optimistic_hz: bool
-    hz_classification: str  # "conservative", "optimistic", "too_hot", "too_cold", "unknown"
+    conservative_hz: bool = False
+    optimistic_hz: bool = False
+    hz_classification: str = "unknown"  # "conservative", "optimistic", "too_hot", "too_cold", "unknown"
 
-    # Probabilistic assessment (when input uncertainties exist)
-    prob_conservative: Optional[float]
-    prob_optimistic: Optional[float]
-    probability_calculable: bool
+    # Probabilistic assessment (when input uncertainties exist and domain is valid)
+    prob_conservative: Optional[float] = None
+    prob_optimistic: Optional[float] = None
+    probability_calculable: bool = False
+    invalid_draw_fraction: float = 0.0
+
+    # Planetary mass reference context
+    reference_mass_earth: float = 1.0
+    mass_reference_note: str = (
+        "Boundary fluxes adopt the 1.0 M_earth reference atmosphere (Kopparapu et al. 2013 Table 3). "
+        "Under Kopparapu et al. (2014), higher-mass planets (~5 M_earth) experience runaway greenhouse "
+        "at ~5% lower stellar flux, while sub-Earths (~0.1 M_earth) withstand ~4% higher flux."
+    )
 
     # Calculated boundaries
-    boundaries: Optional[Dict[str, Any]]
+    boundaries: Optional[Dict[str, Any]] = None
     warnings: List[str] = field(default_factory=list)
     scientific_notes: List[str] = field(default_factory=list)
 
@@ -255,36 +303,83 @@ def resolve_stellar_luminosity(
 def calculate_incident_flux(
     luminosity_solar: Optional[float],
     semi_major_axis_au: Optional[float],
+    eccentricity: Optional[float] = None,
     luminosity_err: Optional[float] = None,
     semi_major_axis_err: Optional[float] = None,
-) -> Tuple[Optional[float], Optional[float]]:
+    eccentricity_err: Optional[float] = None,
+) -> IncidentFluxResult:
     """
-    Computes incident stellar flux: S_eff = L_* / a^2 (relative to Earth).
+    Computes incident stellar flux accounting for orbital eccentricity:
+    - Orbit-averaged flux: <S_eff> = L_* / (a^2 * sqrt(1 - e^2))
+    - Semi-major axis flux: S_semi = L_* / a^2
+    - Periastron flux: S_peri = L_* / (a^2 * (1 - e)^2)
+    - Apastron flux: S_apo = L_* / (a^2 * (1 + e)^2)
+
     Propagates uncertainty if available:
-        (sigma_S / S_eff)^2 = (sigma_L / L_*)^2 + (2 * sigma_a / a)^2
+        (sigma_<S> / <S>)^2 = (sigma_L / L_*)^2 + (2 * sigma_a / a)^2 + (e * sigma_e / (1 - e^2))^2
     """
+    warnings: List[str] = []
     if luminosity_solar is None or semi_major_axis_au is None:
-        return None, None
+        return IncidentFluxResult(None, None, warnings=warnings)
     if luminosity_solar <= 0 or semi_major_axis_au <= 0:
-        return None, None
+        return IncidentFluxResult(None, None, warnings=warnings)
 
-    s_eff = float(luminosity_solar / (semi_major_axis_au ** 2.0))
+    s_semi = float(luminosity_solar / (semi_major_axis_au ** 2.0))
 
-    s_eff_err = None
-    if luminosity_err is not None and semi_major_axis_err is not None:
-        if luminosity_err >= 0 and semi_major_axis_err >= 0:
-            rel_l = luminosity_err / luminosity_solar
-            rel_a = semi_major_axis_err / semi_major_axis_au
-            rel_s = math.sqrt(rel_l ** 2.0 + (2.0 * rel_a) ** 2.0)
-            s_eff_err = float(s_eff * rel_s)
-    elif luminosity_err is not None and luminosity_err >= 0:
-        rel_l = luminosity_err / luminosity_solar
-        s_eff_err = float(s_eff * rel_l)
-    elif semi_major_axis_err is not None and semi_major_axis_err >= 0:
-        rel_a = semi_major_axis_err / semi_major_axis_au
-        s_eff_err = float(s_eff * (2.0 * rel_a))
+    # Validate eccentricity
+    ecc_val: Optional[float] = None
+    is_circ = True
+    if eccentricity is not None:
+        if math.isnan(eccentricity) or eccentricity < 0.0 or eccentricity >= 1.0:
+            warnings.append(
+                f"Invalid orbital eccentricity {eccentricity}: must satisfy 0 <= e < 1 for bound orbits. "
+                "Defaulting to circular orbit approximation."
+            )
+        else:
+            ecc_val = float(eccentricity)
+            is_circ = (ecc_val == 0.0)
 
-    return s_eff, s_eff_err
+    if ecc_val is not None and ecc_val > 0.0:
+        geom_factor = math.sqrt(1.0 - (ecc_val ** 2.0))
+        s_avg = float(s_semi / geom_factor)
+        s_peri = float(s_semi / ((1.0 - ecc_val) ** 2.0))
+        s_apo = float(s_semi / ((1.0 + ecc_val) ** 2.0))
+    else:
+        s_avg = s_semi
+        s_peri = s_semi if ecc_val == 0.0 else None
+        s_apo = s_semi if ecc_val == 0.0 else None
+
+    # Error propagation for orbit-averaged flux
+    s_avg_err: Optional[float] = None
+    s_semi_err: Optional[float] = None
+
+    rel_l = (luminosity_err / luminosity_solar) if (luminosity_err is not None and luminosity_err >= 0) else 0.0
+    rel_a = (semi_major_axis_err / semi_major_axis_au) if (semi_major_axis_err is not None and semi_major_axis_err >= 0) else 0.0
+
+    if ecc_val is not None and ecc_val > 0.0 and eccentricity_err is not None and eccentricity_err >= 0:
+        denom = max(1e-4, 1.0 - (ecc_val ** 2.0))
+        rel_e = (ecc_val * eccentricity_err) / denom
+    else:
+        rel_e = 0.0
+
+    has_any_unc = (luminosity_err is not None) or (semi_major_axis_err is not None) or (rel_e > 0.0)
+    if has_any_unc:
+        rel_s_semi = math.sqrt((rel_l ** 2.0) + (4.0 * (rel_a ** 2.0)))
+        rel_s_avg = math.sqrt((rel_l ** 2.0) + (4.0 * (rel_a ** 2.0)) + (rel_e ** 2.0))
+        s_semi_err = float(s_semi * rel_s_semi) if rel_s_semi > 0 else None
+        s_avg_err = float(s_avg * rel_s_avg) if rel_s_avg > 0 else None
+
+    return IncidentFluxResult(
+        flux_orbit_averaged=s_avg,
+        flux_orbit_averaged_err=s_avg_err,
+        flux_at_semi_major_axis=s_semi,
+        flux_at_semi_major_axis_err=s_semi_err,
+        flux_periastron=s_peri,
+        flux_apastron=s_apo,
+        is_circular_approximation=is_circ,
+        eccentricity=ecc_val,
+        warnings=warnings,
+    )
 
 
 def compute_kopparapu_boundaries(
@@ -293,7 +388,7 @@ def compute_kopparapu_boundaries(
 ) -> HZBoundaries:
     """
     Calculates temperature-dependent HZ flux and distance boundaries
-    using Kopparapu et al. (2013, 2014) polynomial parameterisation.
+    using Kopparapu et al. (2013, 2014) polynomial parameterisation for 1 M_earth.
 
     Strictly validates that Teff is within [2600 K, 7200 K].
     Does NOT extrapolate outside this range.
@@ -354,25 +449,29 @@ def assess_habitable_zone(
     luminosity_log10: Optional[float] = None,
     radius_solar: Optional[float] = None,
     teff_k: Optional[float] = None,
+    eccentricity: Optional[float] = None,
     semi_major_axis_err: Optional[float] = None,
     luminosity_err: Optional[float] = None,
     radius_err: Optional[float] = None,
     teff_err: Optional[float] = None,
+    eccentricity_err: Optional[float] = None,
     n_mc_samples: int = 2000,
     random_seed: Optional[int] = 42,
 ) -> HabitableZoneAssessment:
     """
     Performs full scientific habitable zone assessment:
-    - Resolves stellar luminosity and records provenance
-    - Calculates incident stellar flux S_eff and uncertainty
+    - Resolves stellar luminosity and records provenance (never defaults to solar)
+    - Calculates incident stellar flux <S_eff> accounting for orbital eccentricity
     - Evaluates temperature-dependent Kopparapu conservative & optimistic boundaries
-    - Performs Monte Carlo uncertainty propagation when observational errors exist
-    - Removes any midpoint/distance scoring rewards
+    - Performs correlated Monte Carlo uncertainty propagation when observational errors exist
+    - Prevents arbitrary midpoint/distance scoring rewards
+    - Tracks and reports model domain crossings (>10% invalid draws invalidates probability)
     """
     warnings: List[str] = []
     scientific_notes: List[str] = [
         "Habitable-zone membership defines incident stellar flux limits where liquid surface water "
-        "could theoretically exist; it does not confirm habitability, atmosphere presence, or surface water."
+        "could theoretically exist; it does not confirm habitability, atmosphere presence, or surface water.",
+        "Primary classification uses annual orbit-averaged stellar flux <S_eff> = L_* / (a^2 * sqrt(1 - e^2)).",
     ]
 
     # 1. Resolve stellar luminosity
@@ -391,27 +490,37 @@ def assess_habitable_zone(
     lum_source = lum_res.luminosity_source
     lum_err_val = lum_res.uncertainty_solar
 
-    # 2. Compute incident stellar flux
-    s_eff, s_eff_err = calculate_incident_flux(
+    # 2. Compute incident stellar flux (including eccentricity)
+    flux_res = calculate_incident_flux(
         luminosity_solar=lum_val,
         semi_major_axis_au=semi_major_axis_au,
+        eccentricity=eccentricity,
         luminosity_err=lum_err_val,
         semi_major_axis_err=semi_major_axis_err,
+        eccentricity_err=eccentricity_err,
     )
+    warnings.extend(flux_res.warnings)
 
-    if s_eff is None:
+    s_avg = flux_res.flux_orbit_averaged
+    s_avg_err = flux_res.flux_orbit_averaged_err
+    s_semi = flux_res.flux_at_semi_major_axis
+    s_peri = flux_res.flux_periastron
+    s_apo = flux_res.flux_apastron
+    is_circ = flux_res.is_circular_approximation
+
+    if s_avg is None:
         warnings.append("Incident stellar flux cannot be computed (missing semi-major axis or luminosity).")
 
     # 3. Compute Kopparapu boundaries
     bounds = compute_kopparapu_boundaries(teff_k=teff_k, luminosity_solar=lum_val)
     warnings.extend(bounds.warnings)
 
-    # 4. Classify based on deterministic flux
+    # 4. Classify based on deterministic orbit-averaged flux
     conservative_hz = False
     optimistic_hz = False
     hz_classification = "unknown"
 
-    if s_eff is not None and bounds.is_valid_range:
+    if s_avg is not None and bounds.is_valid_range:
         s_inner_cons = bounds.s_eff_runaway_greenhouse
         s_outer_cons = bounds.s_eff_maximum_greenhouse
         s_inner_opt = bounds.s_eff_recent_venus
@@ -419,84 +528,136 @@ def assess_habitable_zone(
 
         if s_inner_cons is not None and s_outer_cons is not None:
             # Note: flux decreases outward; outer boundary has smaller S_eff than inner boundary
-            if s_outer_cons <= s_eff <= s_inner_cons:
+            if s_outer_cons <= s_avg <= s_inner_cons:
                 conservative_hz = True
                 optimistic_hz = True  # Conservative is a subset of optimistic
                 hz_classification = "conservative"
-            elif s_inner_opt is not None and s_outer_opt is not None and (s_outer_opt <= s_eff <= s_inner_opt):
+            elif s_inner_opt is not None and s_outer_opt is not None and (s_outer_opt <= s_avg <= s_inner_opt):
                 optimistic_hz = True
                 hz_classification = "optimistic"
-            elif s_inner_opt is not None and s_eff > s_inner_opt:
+            elif s_inner_opt is not None and s_avg > s_inner_opt:
                 hz_classification = "too_hot"
-            elif s_outer_opt is not None and s_eff < s_outer_opt:
+            elif s_outer_opt is not None and s_avg < s_outer_opt:
                 hz_classification = "too_cold"
-    elif s_eff is not None and not bounds.is_valid_range:
+
+        # Check orbital flux excursion (periastron/apastron crossing)
+        if s_peri is not None and s_inner_cons is not None and s_peri > s_inner_cons and conservative_hz:
+            warnings.append(
+                f"Orbital excursion: While orbit-averaged flux ({s_avg:.2f} S_earth) is inside conservative HZ, "
+                f"periastron flux ({s_peri:.2f} S_earth) exceeds runaway greenhouse boundary ({s_inner_cons:.2f} S_earth)."
+            )
+        if s_apo is not None and s_outer_cons is not None and s_apo < s_outer_cons and conservative_hz:
+            warnings.append(
+                f"Orbital excursion: While orbit-averaged flux ({s_avg:.2f} S_earth) is inside conservative HZ, "
+                f"apastron flux ({s_apo:.2f} S_earth) drops below maximum greenhouse boundary ({s_outer_cons:.2f} S_earth)."
+            )
+
+    elif s_avg is not None and not bounds.is_valid_range:
         hz_classification = "unknown"
         warnings.append("HZ classification marked unknown due to invalid stellar Teff range.")
 
-    # 5. Monte Carlo error propagation for membership probabilities
+    # 5. Correlated Monte Carlo error propagation for membership probabilities
     prob_conservative: Optional[float] = None
     prob_optimistic: Optional[float] = None
     probability_calculable = False
+    invalid_draw_fraction = 0.0
 
     has_orbit_unc = semi_major_axis_err is not None and semi_major_axis_err > 0
     has_lum_unc = lum_err_val is not None and lum_err_val > 0
+    has_teff_unc = teff_err is not None and teff_err > 0
+    has_rad_unc = radius_err is not None and radius_err > 0
+    has_ecc_unc = eccentricity_err is not None and eccentricity_err > 0
+
     can_mc = (
-        s_eff is not None
+        s_avg is not None
         and bounds.is_valid_range
         and semi_major_axis_au is not None
-        and lum_val is not None
-        and (has_orbit_unc or has_lum_unc)
+        and (has_orbit_unc or has_lum_unc or (lum_source == "derived" and (has_rad_unc or has_teff_unc)))
     )
 
     if can_mc:
         rng = np.random.default_rng(random_seed)
         a_sigma = float(semi_major_axis_err) if has_orbit_unc else 0.0
-        l_sigma = float(lum_err_val) if has_lum_unc else 0.0
-        t_sigma = float(teff_err) if (teff_err is not None and teff_err > 0) else 0.0
+        e_sigma = float(eccentricity_err) if has_ecc_unc else 0.0
+        ecc_base = flux_res.eccentricity if flux_res.eccentricity is not None else 0.0
 
+        # Positive-valued semi-major axis draws
         a_draws = np.maximum(0.001, rng.normal(semi_major_axis_au, a_sigma, n_mc_samples)) if a_sigma > 0 else np.full(n_mc_samples, semi_major_axis_au)
-        l_draws = np.maximum(1e-8, rng.normal(lum_val, l_sigma, n_mc_samples)) if l_sigma > 0 else np.full(n_mc_samples, lum_val)
 
-        if t_sigma > 0 and teff_k is not None:
-            t_draws = rng.normal(teff_k, t_sigma, n_mc_samples)
+        # Eccentricity draws constrained to physical bound Keplerian range [0, 0.99]
+        if e_sigma > 0:
+            e_draws = np.clip(rng.normal(ecc_base, e_sigma, n_mc_samples), 0.0, 0.99)
         else:
-            t_draws = np.full(n_mc_samples, teff_k if teff_k is not None else 5780.0)
+            e_draws = np.full(n_mc_samples, ecc_base)
 
-        s_draws = l_draws / (a_draws ** 2.0)
+        # ── Correlated Stellar Parameter Sampling ───────────────────────────
+        if lum_source == "derived" and radius_solar is not None and teff_k is not None:
+            # Physical correlation: sample R_* and T_eff independently, then derive L_* per draw!
+            r_sigma = float(radius_err) if has_rad_unc else 0.0
+            t_sigma = float(teff_err) if has_teff_unc else 0.0
 
-        in_cons_count = 0
-        in_opt_count = 0
-        valid_eval_count = 0
+            r_draws = np.maximum(0.001, rng.normal(radius_solar, r_sigma, n_mc_samples)) if r_sigma > 0 else np.full(n_mc_samples, radius_solar)
+            t_draws = np.maximum(100.0, rng.normal(teff_k, t_sigma, n_mc_samples)) if t_sigma > 0 else np.full(n_mc_samples, teff_k)
+            l_draws = (r_draws ** 2.0) * ((t_draws / T_SUN_K) ** 4.0)
+        else:
+            # Catalog luminosity: sample L directly
+            l_sigma = float(lum_err_val) if has_lum_unc else 0.0
+            t_sigma = float(teff_err) if has_teff_unc else 0.0
 
-        for s_i, t_i in zip(s_draws, t_draws):
-            if TEFF_MIN_K <= t_i <= TEFF_MAX_K:
-                t_star_i = t_i - KOPPARAPU_T_REF_K
-                c_rg = KOPPARAPU_COEFFICIENTS["runaway_greenhouse"]
-                s_rg = (c_rg["s_eff_sun"] + c_rg["a"] * t_star_i + c_rg["b"] * (t_star_i**2) + c_rg["c"] * (t_star_i**3) + c_rg["d"] * (t_star_i**4))
+            l_draws = np.maximum(1e-8, rng.normal(lum_val, l_sigma, n_mc_samples)) if l_sigma > 0 else np.full(n_mc_samples, lum_val)
+            t_draws = np.maximum(100.0, rng.normal(teff_k, t_sigma, n_mc_samples)) if (t_sigma > 0 and teff_k is not None) else np.full(n_mc_samples, teff_k if teff_k is not None else 5780.0)
 
-                c_mg = KOPPARAPU_COEFFICIENTS["maximum_greenhouse"]
-                s_mg = (c_mg["s_eff_sun"] + c_mg["a"] * t_star_i + c_mg["b"] * (t_star_i**2) + c_mg["c"] * (t_star_i**3) + c_mg["d"] * (t_star_i**4))
+        # Orbit-averaged flux per draw
+        geom_factors = np.sqrt(np.maximum(0.01, 1.0 - (e_draws ** 2.0)))
+        s_draws = l_draws / ((a_draws ** 2.0) * geom_factors)
 
-                c_rv = KOPPARAPU_COEFFICIENTS["recent_venus"]
-                s_rv = (c_rv["s_eff_sun"] + c_rv["a"] * t_star_i + c_rv["b"] * (t_star_i**2) + c_rv["c"] * (t_star_i**3) + c_rv["d"] * (t_star_i**4))
+        # ── Track Model Domain Crossings ─────────────────────────────────────
+        out_of_domain = (t_draws < TEFF_MIN_K) | (t_draws > TEFF_MAX_K)
+        out_of_domain_count = int(np.sum(out_of_domain))
+        invalid_draw_fraction = round(float(out_of_domain_count / n_mc_samples), 4)
 
-                c_em = KOPPARAPU_COEFFICIENTS["early_mars"]
-                s_em = (c_em["s_eff_sun"] + c_em["a"] * t_star_i + c_em["b"] * (t_star_i**2) + c_em["c"] * (t_star_i**3) + c_em["d"] * (t_star_i**4))
+        if invalid_draw_fraction > 0.10:
+            probability_calculable = False
+            prob_conservative = None
+            prob_optimistic = None
+            warnings.append(
+                f"{invalid_draw_fraction * 100:.1f}% of stellar effective temperature Monte Carlo draws "
+                f"fall outside published Kopparapu validity range [{TEFF_MIN_K:.0f} K, {TEFF_MAX_K:.0f} K]; "
+                f"HZ membership probabilities cannot be reliably evaluated."
+            )
+        else:
+            in_cons_count = 0
+            in_opt_count = 0
+            valid_eval_count = 0
 
-                valid_eval_count += 1
-                if s_mg <= s_i <= s_rg:
-                    in_cons_count += 1
-                    in_opt_count += 1
-                elif s_em <= s_i <= s_rv:
-                    in_opt_count += 1
+            for s_i, t_i in zip(s_draws, t_draws):
+                if TEFF_MIN_K <= t_i <= TEFF_MAX_K:
+                    t_star_i = t_i - KOPPARAPU_T_REF_K
+                    c_rg = KOPPARAPU_COEFFICIENTS["runaway_greenhouse"]
+                    s_rg = (c_rg["s_eff_sun"] + c_rg["a"] * t_star_i + c_rg["b"] * (t_star_i**2) + c_rg["c"] * (t_star_i**3) + c_rg["d"] * (t_star_i**4))
 
-        if valid_eval_count > 0:
-            prob_conservative = round(float(in_cons_count / valid_eval_count), 4)
-            prob_optimistic = round(float(in_opt_count / valid_eval_count), 4)
-            probability_calculable = True
+                    c_mg = KOPPARAPU_COEFFICIENTS["maximum_greenhouse"]
+                    s_mg = (c_mg["s_eff_sun"] + c_mg["a"] * t_star_i + c_mg["b"] * (t_star_i**2) + c_mg["c"] * (t_star_i**3) + c_mg["d"] * (t_star_i**4))
+
+                    c_rv = KOPPARAPU_COEFFICIENTS["recent_venus"]
+                    s_rv = (c_rv["s_eff_sun"] + c_rv["a"] * t_star_i + c_rv["b"] * (t_star_i**2) + c_rv["c"] * (t_star_i**3) + c_rv["d"] * (t_star_i**4))
+
+                    c_em = KOPPARAPU_COEFFICIENTS["early_mars"]
+                    s_em = (c_em["s_eff_sun"] + c_em["a"] * t_star_i + c_em["b"] * (t_star_i**2) + c_em["c"] * (t_star_i**3) + c_em["d"] * (t_star_i**4))
+
+                    valid_eval_count += 1
+                    if s_mg <= s_i <= s_rg:
+                        in_cons_count += 1
+                        in_opt_count += 1
+                    elif s_em <= s_i <= s_rv:
+                        in_opt_count += 1
+
+            if valid_eval_count > 0:
+                prob_conservative = round(float(in_cons_count / valid_eval_count), 4)
+                prob_optimistic = round(float(in_opt_count / valid_eval_count), 4)
+                probability_calculable = True
     else:
-        if s_eff is not None:
+        if s_avg is not None:
             warnings.append("Observational uncertainties unavailable for orbit/star; HZ probabilities cannot be evaluated.")
 
     boundaries_dict = {
@@ -518,9 +679,14 @@ def assess_habitable_zone(
     }
 
     return HabitableZoneAssessment(
-        incident_stellar_flux=round(s_eff, 4) if s_eff is not None else None,
-        incident_stellar_flux_err=round(s_eff_err, 4) if s_eff_err is not None else None,
-        flux_relative_to_earth=round(s_eff, 4) if s_eff is not None else None,
+        incident_stellar_flux=round(s_avg, 4) if s_avg is not None else None,
+        incident_stellar_flux_err=round(s_avg_err, 4) if s_avg_err is not None else None,
+        flux_relative_to_earth=round(s_avg, 4) if s_avg is not None else None,
+        flux_at_semi_major_axis=round(s_semi, 4) if s_semi is not None else None,
+        flux_periastron=round(s_peri, 4) if s_peri is not None else None,
+        flux_apastron=round(s_apo, 4) if s_apo is not None else None,
+        eccentricity=flux_res.eccentricity,
+        is_circular_approximation=is_circ,
         luminosity_solar=round(lum_val, 6) if lum_val is not None else None,
         luminosity_source=lum_source,
         luminosity_err=round(lum_err_val, 6) if lum_err_val is not None else None,
@@ -530,6 +696,7 @@ def assess_habitable_zone(
         prob_conservative=prob_conservative,
         prob_optimistic=prob_optimistic,
         probability_calculable=probability_calculable,
+        invalid_draw_fraction=invalid_draw_fraction,
         boundaries=boundaries_dict,
         warnings=warnings,
         scientific_notes=scientific_notes,

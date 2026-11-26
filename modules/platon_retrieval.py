@@ -26,6 +26,7 @@ from modules.retrieval_reproducibility import (
     create_retrieval_configuration,
     evaluate_retrieval_reproducibility,
     ConvergenceDiagnostics,
+    compute_kish_effective_sample_size,
 )
 
 from dotenv import load_dotenv
@@ -225,6 +226,13 @@ def run_platon_retrieval(
 
         # 6. Initialize Retriever and run Nested Sampling
         print(f"\n[PLATON] Starting Nested Sampling Retrieval for spec_id={spec_id} (Seed={random_seed})")
+        import numpy as np
+        import random, os
+        if random_seed is not None:
+            np.random.seed(random_seed)
+            random.seed(random_seed)
+            os.environ["PYTHONHASHSEED"] = str(random_seed)
+
         retriever = CombinedRetriever()
 
         fit_info = retriever.get_default_fit_info(
@@ -256,27 +264,49 @@ def run_platon_retrieval(
             fit_info=fit_info
         )
 
-        best_fit_dict = {p: float(val) for p, val in zip(params_to_retrieve, result.x)}
-        evidence_ln_z = float(result.logz[-1]) if hasattr(result, 'logz') else 0.0
-        evidence_err = float(result.logzerr[-1]) if hasattr(result, 'logzerr') else 0.1
+        best_fit_dict = {p: float(val) for p, val in zip(params_to_retrieve, result.x)} if hasattr(result, 'x') else {}
+        evidence_ln_z = float(result.logz[-1]) if (hasattr(result, 'logz') and len(result.logz) > 0) else None
+        evidence_err = float(result.logzerr[-1]) if (hasattr(result, 'logzerr') and len(result.logzerr) > 0) else None
 
         samples = result.samples.tolist() if hasattr(result, 'samples') else []
         weights = result.importance_weights().tolist() if hasattr(result, 'importance_weights') else []
 
-        # 7. Evaluate convergence and reproducibility
+        # 7. Evaluate convergence and reproducibility with Kish ESS and defensible criteria
         n_samples = len(samples)
-        converged = bool(evidence_ln_z != 0.0 and n_samples > 50)
+        effective_sample_size = compute_kish_effective_sample_size(weights)
+
+        converged = bool(
+            evidence_ln_z is not None
+            and evidence_err is not None
+            and evidence_err <= 0.5
+            and effective_sample_size is not None
+            and effective_sample_size >= 100.0
+            and n_samples >= 100
+        )
+        warnings = []
+        if not converged:
+            if evidence_ln_z is None:
+                warnings.append("Sampler evidence log(Z) could not be determined.")
+            if evidence_err is None:
+                warnings.append("Sampler evidence uncertainty is unavailable.")
+            elif evidence_err > 0.5:
+                warnings.append(f"Evidence uncertainty ({evidence_err:.3f}) exceeds tolerance (0.5).")
+            if effective_sample_size is None or effective_sample_size < 100.0:
+                warnings.append(f"Effective sample size ({effective_sample_size}) is below acceptable threshold (100.0).")
+            if n_samples < 100:
+                warnings.append(f"Sample count ({n_samples}) is below live threshold.")
+
         diagnostics = ConvergenceDiagnostics(
             converged=converged,
             evidence_ln_z=evidence_ln_z,
             evidence_err=evidence_err,
             n_samples=n_samples,
-            effective_sample_size=float(n_samples),
-            warnings=[] if converged else ["Sample count below required live threshold."],
+            effective_sample_size=effective_sample_size,
+            warnings=warnings,
             diagnostics_notes=["Nested sampling evidence converged within tolerance."] if converged else ["Convergence not established."],
         )
 
-        repro_status, repro_notes = evaluate_retrieval_reproducibility(retrieval_config, diagnostics)
+        repro_status, repro_notes = evaluate_retrieval_reproducibility(retrieval_config, diagnostics, require_disk_verification=True)
         retrieval_config.reproducibility_status = repro_status
         retrieval_config.reproducibility_notes = repro_notes
         retrieval_config.convergence = {
@@ -284,6 +314,7 @@ def run_platon_retrieval(
             "evidence_ln_z": diagnostics.evidence_ln_z,
             "evidence_err": diagnostics.evidence_err,
             "n_samples": diagnostics.n_samples,
+            "effective_sample_size": diagnostics.effective_sample_size,
             "warnings": diagnostics.warnings,
         }
 
@@ -351,7 +382,7 @@ def mark_failed(retrieval_id: str, error_message: str):
         session.execute(text("""
             UPDATE atmospheric_retrievals
             SET status = 'failed',
-                reproducibility_status = 'convergence_not_established',
+                reproducibility_status = 'reproducibility_metadata_incomplete',
                 error_message = :err
             WHERE retrieval_id = :rid
         """), {"err": error_message, "rid": retrieval_id})

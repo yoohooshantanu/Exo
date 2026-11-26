@@ -306,3 +306,88 @@ class TestHabitableZoneAssessment:
         assert res2.hz_classification == "conservative"
         # The assessment does not contain a midpoint distance multiplier
         assert "score" not in res1.__dict__
+
+    def test_trappist_1e_out_of_domain_returns_unknown_and_warning(self):
+        # TRAPPIST-1 e actual stellar temperature Teff ~ 2566 K (< 2600 K Kopparapu lower limit)
+        # a = 0.0293 AU, L derived from R_* = 0.1192 R_sun, Teff = 2566 K -> L ~ 0.00055 L_sun
+        res = assess_habitable_zone(
+            semi_major_axis_au=0.0293,
+            teff_k=2566.0,
+            radius_solar=0.1192,
+            eccentricity=0.006,
+        )
+        # Must return unknown classification, never falsely claim conservative or optimistic
+        assert res.hz_classification == "unknown"
+        assert res.conservative_hz is False
+        assert res.optimistic_hz is False
+        assert res.prob_conservative is None
+        assert res.prob_optimistic is None
+        assert any("2566.0 K" in w and "2600 K" in w for w in res.warnings)
+
+    def test_eccentric_orbit_flux_calculations(self):
+        # Star: Sun-like (L = 1.0, Teff = 5780 K)
+        # Planet: a = 1.0 AU, e = 0.2
+        # <S_eff> = 1.0 / (1.0^2 * sqrt(1 - 0.2^2)) = 1 / sqrt(0.96) ~ 1.02062
+        # S_peri = 1.0 / (1.0 * (1 - 0.2))^2 = 1.0 / 0.64 = 1.5625
+        # S_apo = 1.0 / (1.0 * (1 + 0.2))^2 = 1.0 / 1.44 ~ 0.69444
+        res = assess_habitable_zone(
+            semi_major_axis_au=1.0,
+            luminosity_solar=1.0,
+            teff_k=5780.0,
+            eccentricity=0.2,
+        )
+        assert res.incident_stellar_flux == pytest.approx(1.0 / math.sqrt(0.96), rel=1e-3)
+        assert res.flux_at_semi_major_axis == pytest.approx(1.0, rel=1e-3)
+        assert res.flux_periastron == pytest.approx(1.5625, rel=1e-3)
+        assert res.flux_apastron == pytest.approx(1.0 / 1.44, rel=1e-3)
+        assert res.is_circular_approximation is False
+
+    def test_circular_orbit_fallback(self):
+        # When eccentricity is None or 0.0, falls back to circular approximation
+        res = assess_habitable_zone(
+            semi_major_axis_au=1.0,
+            luminosity_solar=1.0,
+            teff_k=5780.0,
+            eccentricity=None,
+        )
+        assert res.incident_stellar_flux == pytest.approx(1.0)
+        assert res.is_circular_approximation is True
+        assert res.flux_periastron is None
+        assert res.flux_apastron is None
+
+    def test_invalid_eccentricity_handled_safely(self):
+        # e >= 1.0 or e < 0.0 is unphysical for bound orbits
+        res = assess_habitable_zone(
+            semi_major_axis_au=1.0,
+            luminosity_solar=1.0,
+            teff_k=5780.0,
+            eccentricity=1.05,
+        )
+        assert res.is_circular_approximation is True
+        assert any("eccentricity" in w.lower() for w in res.warnings)
+
+    def test_reference_mass_metadata(self):
+        res = assess_habitable_zone(
+            semi_major_axis_au=1.0,
+            luminosity_solar=1.0,
+            teff_k=5780.0,
+        )
+        assert res.reference_mass_earth == 1.0
+        assert "1.0 M_earth" in res.mass_reference_note
+
+    def test_monte_carlo_domain_crossing_guard(self):
+        # Star Teff = 2620 K (very close to 2600 K cutoff) with uncertainty 100 K
+        # Large fraction of draws will fall below 2600 K
+        res = assess_habitable_zone(
+            semi_major_axis_au=0.03,
+            luminosity_solar=0.0006,
+            teff_k=2620.0,
+            semi_major_axis_err=0.001,
+            luminosity_err=0.00005,
+            teff_err=100.0,
+        )
+        # Because >10% of draws cross below 2600 K, probability_calculable must be False
+        assert res.probability_calculable is False
+        assert res.prob_conservative is None
+        assert res.prob_optimistic is None
+        assert any("validity range" in w.lower() or "fall outside" in w.lower() for w in res.warnings)

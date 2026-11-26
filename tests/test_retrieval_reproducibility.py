@@ -26,6 +26,9 @@ from modules.retrieval_reproducibility import (
     evaluate_retrieval_reproducibility,
     get_known_opacity_provenance,
     sanitize_legacy_retrieval_record,
+    compute_file_sha256,
+    verify_runtime_opacity_file,
+    compute_kish_effective_sample_size,
 )
 
 
@@ -145,6 +148,7 @@ class TestReproducibilityEvaluation:
             evidence_ln_z=-310.2,
             evidence_err=0.12,
             n_samples=1200,
+            effective_sample_size=600.0,
             warnings=[],
         )
 
@@ -180,11 +184,141 @@ class TestReproducibilityEvaluation:
             random_seed=None,
             chemical_species=["UnknownMolecule_Z"],
         )
-        diagnostics = ConvergenceDiagnostics(converged=True, evidence_err=0.1)
+        diagnostics = ConvergenceDiagnostics(
+            converged=True,
+            evidence_err=0.1,
+            effective_sample_size=300.0,
+        )
 
         status, notes = evaluate_retrieval_reproducibility(config, diagnostics)
         assert status == "reproducibility_metadata_incomplete"
         assert any("missing" in n.lower() or "unknown" in n.lower() for n in notes)
+
+    def test_missing_evidence_err_fails_convergence(self):
+        # Missing evidence uncertainty (None) must not default to 0.1
+        config = create_retrieval_configuration(
+            retrieval_id="ret-4",
+            planet_id="p-1",
+            spec_id="s-1",
+            random_seed=42,
+            chemical_species=["H2O"],
+        )
+        diagnostics = ConvergenceDiagnostics(
+            converged=True,
+            evidence_ln_z=-200.0,
+            evidence_err=None,
+            effective_sample_size=500.0,
+        )
+        status, notes = evaluate_retrieval_reproducibility(config, diagnostics)
+        assert status == "convergence_not_established"
+        assert any("missing" in n.lower() for n in notes)
+
+    def test_low_effective_sample_size_fails_convergence(self):
+        config = create_retrieval_configuration(
+            retrieval_id="ret-5",
+            planet_id="p-1",
+            spec_id="s-1",
+            random_seed=42,
+            chemical_species=["H2O"],
+        )
+        diagnostics = ConvergenceDiagnostics(
+            converged=True,
+            evidence_ln_z=-200.0,
+            evidence_err=0.1,
+            effective_sample_size=50.0,  # Below threshold 100.0
+        )
+        status, notes = evaluate_retrieval_reproducibility(config, diagnostics)
+        assert status == "convergence_not_established"
+        assert any("effective sample size" in n.lower() for n in notes)
+
+
+class TestKishEffectiveSampleSize:
+    def test_uniform_weights_equal_sample_count(self):
+        weights = [1.0] * 500
+        ess = compute_kish_effective_sample_size(weights)
+        assert ess == pytest.approx(500.0)
+
+    def test_single_dominant_sample_yields_one(self):
+        weights = [1.0] + [0.0] * 999
+        ess = compute_kish_effective_sample_size(weights)
+        assert ess == pytest.approx(1.0)
+
+    def test_arbitrary_weights_calculation(self):
+        weights = [1.0, 2.0, 3.0, 4.0]
+        # sum = 10 -> (sum)^2 = 100
+        # sum_sq = 1 + 4 + 9 + 16 = 30
+        # ess = 100 / 30 = 3.3333...
+        ess = compute_kish_effective_sample_size(weights)
+        assert ess == pytest.approx(100.0 / 30.0)
+
+    def test_empty_or_invalid_weights_returns_none(self):
+        assert compute_kish_effective_sample_size(None) is None
+        assert compute_kish_effective_sample_size([]) is None
+        assert compute_kish_effective_sample_size([0.0, 0.0]) is None
+
+
+class TestDiskOpacityVerification:
+    def test_hash_real_file(self, tmp_path):
+        test_file = tmp_path / "1H2-16O__POKAZATEL.R1000_0.3-50mu.ktable.npz"
+        test_file.write_bytes(b"Simulated opacity binary content for testing")
+
+        sha = compute_file_sha256(test_file)
+        assert sha is not None
+        assert len(sha) == 64
+
+        # Verify against hashlib directly
+        import hashlib
+        expected_sha = hashlib.sha256(b"Simulated opacity binary content for testing").hexdigest()
+        assert sha == expected_sha
+
+    def test_hash_non_existent_file_returns_none(self, tmp_path):
+        missing = tmp_path / "non_existent.npz"
+        assert compute_file_sha256(missing) is None
+
+    def test_verify_runtime_opacity_file_found(self, tmp_path):
+        test_file = tmp_path / "1H2-16O__POKAZATEL.R1000_0.3-50mu.ktable.npz"
+        test_file.write_bytes(b"Opacity Data H2O")
+
+        res = verify_runtime_opacity_file("H2O", opacity_dir=tmp_path)
+        assert res["species"] == "H2O"
+        assert res["runtime_file_verified"] is True
+        disk_ver = res["disk_verification"]
+        assert disk_ver["file_status"] == "verified_on_disk"
+        assert disk_ver["sha256_checksum"] is not None
+        assert disk_ver["provenance_verified"] is True
+
+    def test_verify_runtime_opacity_file_missing(self, tmp_path):
+        res = verify_runtime_opacity_file("H2O", opacity_dir=tmp_path)
+        assert res["species"] == "H2O"
+        assert res["runtime_file_verified"] is False
+        disk_ver = res["disk_verification"]
+        assert disk_ver["file_status"] == "file_not_found"
+        assert disk_ver["sha256_checksum"] is None
+        assert disk_ver["provenance_verified"] is False
+
+    def test_strict_disk_verification_rejects_missing_files(self, tmp_path):
+        config = create_retrieval_configuration(
+            retrieval_id="ret-strict",
+            planet_id="p-1",
+            spec_id="s-1",
+            random_seed=42,
+            chemical_species=["H2O"],
+            opacity_dir=tmp_path,  # Empty dir -> file not found
+            sampler_seed_deterministic=True,
+        )
+        diagnostics = ConvergenceDiagnostics(
+            converged=True,
+            evidence_ln_z=-100.0,
+            evidence_err=0.1,
+            effective_sample_size=500.0,
+        )
+        status, notes = evaluate_retrieval_reproducibility(
+            config,
+            diagnostics,
+            require_disk_verification=True,
+        )
+        assert status == "reproducibility_metadata_incomplete"
+        assert any("not verified on disk" in n.lower() for n in notes)
 
 
 class TestLegacyRecordSanitization:

@@ -167,22 +167,26 @@ def derive_teq(a_au, lum_log=None, radius_solar=None, teff_k=None):
         return None
     return round(278.5 * (lum**0.25) * ((1 - BOND_ALBEDO)**0.25) / math.sqrt(a), 2)
 
-def score_hz(a_au, lum_log=None, teff_k=None, radius_solar=None):
+def score_hz(a_au, lum_log=None, teff_k=None, radius_solar=None, eccentricity=None):
     """
     Habitable-zone assessment based on Kopparapu et al. (2013, 2014).
-    Calculates temperature-dependent flux boundaries.
+    Calculates temperature-dependent flux boundaries accounting for orbital eccentricity.
     Returns 1.0 for conservative HZ, 0.5 for optimistic HZ, 0.0 outside HZ, or None if uncalculable.
     Midpoint distance scoring rewards have been completely removed.
+    If stellar effective temperature is missing, returns None (no silent solar fallback).
     """
     a = nv(a_au)
     if a is None or a <= 0:
         return None
-    teff = nv(teff_k) if teff_k is not None else 5780.0
+    teff = nv(teff_k)
+    if teff is None:
+        return None
     res = assess_habitable_zone(
         semi_major_axis_au=a,
         luminosity_log10=nv(lum_log),
         radius_solar=nv(radius_solar),
         teff_k=teff,
+        eccentricity=nv(eccentricity),
     )
     if res.conservative_hz:
         return 1.0
@@ -448,21 +452,24 @@ def _compute_score_planet(row: pd.Series) -> dict:
     teq      = nv(row.get("eq_temperature_k")) or derive_teq(a_au, lum_log, rad_star, teff)
     age      = nv(row.get("age_gaia_gyr")) or nv(row.get("age_nasa_gyr"))
 
-    # Full Kopparapu habitable-zone assessment
+    # Full Kopparapu habitable-zone assessment (including eccentricity)
     a_err = nv(row.get("semi_major_axis_err"))
     lum_err = nv(row.get("luminosity_solar_err"))
     rad_star_err = nv(row.get("radius_solar_err"))
     teff_err = nv(row.get("teff_err"))
+    ecc_err = nv(row.get("eccentricity_err"))
 
     hz_assessment = assess_habitable_zone(
         semi_major_axis_au=a_au,
         luminosity_log10=lum_log,
         radius_solar=rad_star,
         teff_k=teff,
+        eccentricity=ecc,
         semi_major_axis_err=a_err,
         luminosity_err=lum_err,
         radius_err=rad_star_err,
         teff_err=teff_err,
+        eccentricity_err=ecc_err,
     )
     hz_val = 1.0 if hz_assessment.conservative_hz else (0.5 if hz_assessment.optimistic_hz else (0.0 if hz_assessment.hz_classification in ("too_hot", "too_cold") else None))
 
@@ -548,6 +555,11 @@ def _compute_score_planet(row: pd.Series) -> dict:
             "incident_stellar_flux": hz_assessment.incident_stellar_flux,
             "incident_stellar_flux_err": hz_assessment.incident_stellar_flux_err,
             "flux_relative_to_earth": hz_assessment.flux_relative_to_earth,
+            "flux_at_semi_major_axis": hz_assessment.flux_at_semi_major_axis,
+            "flux_periastron": hz_assessment.flux_periastron,
+            "flux_apastron": hz_assessment.flux_apastron,
+            "eccentricity": hz_assessment.eccentricity,
+            "is_circular_approximation": hz_assessment.is_circular_approximation,
             "luminosity_solar": hz_assessment.luminosity_solar,
             "luminosity_source": hz_assessment.luminosity_source,
             "luminosity_err": hz_assessment.luminosity_err,
@@ -557,6 +569,9 @@ def _compute_score_planet(row: pd.Series) -> dict:
             "prob_conservative": hz_assessment.prob_conservative,
             "prob_optimistic": hz_assessment.prob_optimistic,
             "probability_calculable": hz_assessment.probability_calculable,
+            "invalid_draw_fraction": hz_assessment.invalid_draw_fraction,
+            "reference_mass_earth": hz_assessment.reference_mass_earth,
+            "mass_reference_note": hz_assessment.mass_reference_note,
             "boundaries": hz_assessment.boundaries,
             "warnings": hz_assessment.warnings,
             "scientific_notes": hz_assessment.scientific_notes,

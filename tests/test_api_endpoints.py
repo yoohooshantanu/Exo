@@ -206,32 +206,39 @@ class TestPlanetDetailEndpoint:
 
         detail_mock = MagicMock()
         detail_mock.mappings.return_value.one_or_none.return_value = {
-            "planet_name": "TRAPPIST-1 e",
+            "planet_name": "Kepler-442 b",
             "planet_id": "test-planet-id",
-            "hostname": "TRAPPIST-1",
+            "hostname": "Kepler-442",
             "star_id": "test-star-id",
             "status": "confirmed",
             "discovery_method": "Transit",
-            "discovery_year": 2017,
-            "radius_earth": 0.92,
-            "mass_earth": 0.69,
-            "period_days": 6.10,
-            "eq_temperature_k": 251.0,
-            "semi_major_axis_au": 0.0293,
-            "eccentricity": 0.006,
-            "density_earth": 0.88,
-            "composite_score": 0.85,
-            "composite_score_iqr": 0.04,
+            "discovery_year": 2015,
+            "radius_earth": 1.34,
+            "mass_earth": 2.34,
+            "period_days": 112.3,
+            "eq_temperature_k": 233.0,
+            "semi_major_axis_au": 0.409,
+            "eccentricity": 0.04,
+            "density_earth": 0.98,
+            "composite_score": 0.88,
+            "composite_score_iqr": 0.03,
             "is_imputed": False,
             "hz_score": 1.0,
-            "incident_stellar_flux": 0.66,
-            "incident_stellar_flux_err": 0.03,
+            "incident_stellar_flux": 0.70,
+            "incident_stellar_flux_err": 0.04,
+            "flux_at_semi_major_axis": 0.699,
+            "flux_periastron": 0.758,
+            "flux_apastron": 0.646,
+            "is_circular_approximation": False,
+            "reference_mass_earth": 1.0,
+            "mass_reference_note": "Boundaries computed for 1.0 M_earth reference atmosphere (Kopparapu et al. 2013, 2014).",
+            "invalid_draw_fraction": 0.0,
             "conservative_hz": True,
             "optimistic_hz": True,
             "hz_classification": "conservative",
-            "prob_conservative": 0.94,
-            "prob_optimistic": 0.99,
-            "hz_luminosity_solar": 0.00055,
+            "prob_conservative": 0.92,
+            "prob_optimistic": 0.98,
+            "hz_luminosity_solar": 0.117,
             "hz_luminosity_source": "derived",
             "teq_score": 0.95,
             "radius_esi_score": 0.98,
@@ -264,19 +271,108 @@ class TestPlanetDetailEndpoint:
             empty_list_mock,  # prov
         ]
 
+        response = client.get("/api/planets/Kepler-442%20b")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["planet_name"] == "Kepler-442 b"
+        assert "habitability" in data
+        hab = data["habitability"]
+        assert hab["incident_stellar_flux"] == 0.70
+        assert hab["incident_stellar_flux_err"] == 0.04
+        assert hab["flux_periastron"] == 0.758
+        assert hab["flux_apastron"] == 0.646
+        assert hab["is_circular_approximation"] is False
+        assert hab["reference_mass_earth"] == 1.0
+        assert hab["conservative_hz"] is True
+        assert hab["optimistic_hz"] is True
+        assert hab["hz_classification"] == "conservative"
+        assert hab["prob_conservative"] == 0.92
+        assert hab["luminosity_source"] == "derived"
+        app.dependency_overrides.clear()
+
+    def test_trappist_1e_out_of_domain_returns_unknown_and_warning(self):
+        client, session, app = _get_test_client()
+
+        detail_mock = MagicMock()
+        detail_mock.mappings.return_value.one_or_none.return_value = {
+            "planet_name": "TRAPPIST-1 e",
+            "planet_id": "trappist-1e-id",
+            "hostname": "TRAPPIST-1",
+            "star_id": "trappist-1-star-id",
+            "status": "confirmed",
+            "discovery_method": "Transit",
+            "discovery_year": 2017,
+            "radius_earth": 0.92,
+            "mass_earth": 0.69,
+            "period_days": 6.10,
+            "eq_temperature_k": 251.0,
+            "semi_major_axis_au": 0.0293,
+            "eccentricity": 0.006,
+            "density_earth": 0.88,
+            "composite_score": 0.85,
+            "composite_score_iqr": 0.04,
+            "is_imputed": False,
+            "hz_score": 0.0,
+            "incident_stellar_flux": 0.66,
+            "incident_stellar_flux_err": 0.03,
+            "flux_at_semi_major_axis": 0.66,
+            "flux_periastron": 0.668,
+            "flux_apastron": 0.652,
+            "is_circular_approximation": False,
+            "reference_mass_earth": 1.0,
+            "mass_reference_note": "Boundaries computed for 1.0 M_earth reference atmosphere (Kopparapu et al. 2013, 2014).",
+            "invalid_draw_fraction": 1.0,
+            "conservative_hz": False,
+            "optimistic_hz": False,
+            "hz_classification": "unknown",
+            "prob_conservative": None,
+            "prob_optimistic": None,
+            "hz_luminosity_solar": 0.00055,
+            "hz_luminosity_source": "derived",
+            "teq_score": 0.95,
+            "radius_esi_score": 0.98,
+            "mass_esi_score": 0.94,
+            "tidal_lock_score": 0.05,
+            "xuv_escape_score": 0.70,
+            "eccentricity_score": 0.99,
+            "age_score": 0.80,
+            "similarity_score": 0.95,
+            "safety_score": 0.55,
+            "cluster_label": 1,
+            "cluster_name": "Temperate Terrestrial",
+            "distance_to_centroid": 0.12,
+            "discovery_score": 82.5,
+            "observability_index": 75.0,
+            "physical_triage_index": 85.0,
+            "characterization_index": 78.0,
+        }
+
+        empty_list_mock = MagicMock()
+        empty_list_mock.mappings.return_value.all.return_value = []
+
+        session.execute.side_effect = [
+            detail_mock,
+            empty_list_mock,
+            empty_list_mock,
+            empty_list_mock,
+            empty_list_mock,
+            empty_list_mock,
+            empty_list_mock,
+        ]
+
         response = client.get("/api/planets/TRAPPIST-1%20e")
         assert response.status_code == 200
         data = response.json()
         assert data["planet_name"] == "TRAPPIST-1 e"
         assert "habitability" in data
         hab = data["habitability"]
-        assert hab["incident_stellar_flux"] == 0.66
-        assert hab["incident_stellar_flux_err"] == 0.03
-        assert hab["conservative_hz"] is True
-        assert hab["optimistic_hz"] is True
-        assert hab["hz_classification"] == "conservative"
-        assert hab["prob_conservative"] == 0.94
-        assert hab["luminosity_source"] == "derived"
+        # Must be unknown, not conservative!
+        assert hab["hz_classification"] == "unknown"
+        assert hab["conservative_hz"] is False
+        assert hab["optimistic_hz"] is False
+        assert hab["prob_conservative"] is None
+        assert hab["prob_optimistic"] is None
+        assert hab["invalid_draw_fraction"] == 1.0
         app.dependency_overrides.clear()
 
 
