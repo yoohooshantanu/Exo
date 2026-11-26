@@ -30,6 +30,7 @@ from modules.retrieval_reproducibility import (
     verify_runtime_opacity_file,
     compute_kish_effective_sample_size,
 )
+from modules.platon_retrieval import resolve_retrieval_physical_parameters
 
 
 class TestRetrievalConfiguration:
@@ -349,3 +350,101 @@ class TestLegacyRecordSanitization:
         assert sanitized["reproducibility_status"] == "reproducibility_verified"
         assert sanitized["random_seed"] == 77
         assert len(sanitized["opacity_provenance"]) == 1
+
+
+class TestRetrievalPhysicalParameterValidation:
+    def test_all_catalog_parameters_present(self):
+        resolved, missing, prov = resolve_retrieval_physical_parameters(
+            radius_earth=11.2,
+            mass_earth=317.8,
+            radius_solar=1.0,
+            teff_best_k=5778.0,
+            eq_temperature_k=1200.0,
+            semi_major_axis_au=0.05,
+            luminosity_solar=1.0,
+        )
+        assert missing == []
+        assert resolved is not None
+        assert resolved["radius_earth"] == 11.2
+        assert resolved["mass_earth"] == 317.8
+        assert resolved["radius_solar"] == 1.0
+        assert resolved["teff_k"] == 5778.0
+        assert resolved["eq_temperature_k"] == 1200.0
+        assert prov["teff_k"] == "catalog"
+        assert prov["eq_temperature_k"] == "catalog"
+
+    def test_derive_teff_via_stefan_boltzmann_when_missing(self):
+        resolved, missing, prov = resolve_retrieval_physical_parameters(
+            radius_earth=11.2,
+            mass_earth=317.8,
+            radius_solar=1.0,
+            teff_best_k=None,  # missing
+            eq_temperature_k=1200.0,
+            semi_major_axis_au=0.05,
+            luminosity_solar=1.0,  # 1 L_sun, 1 R_sun -> 5778 K
+        )
+        assert missing == []
+        assert resolved is not None
+        assert resolved["teff_k"] == pytest.approx(5778.0, rel=1e-3)
+        assert prov["teff_k"] == "derived_stefan_boltzmann"
+
+    def test_missing_teff_without_luminosity_raises_error(self):
+        resolved, missing, prov = resolve_retrieval_physical_parameters(
+            radius_earth=11.2,
+            mass_earth=317.8,
+            radius_solar=1.0,
+            teff_best_k=None,
+            eq_temperature_k=1200.0,
+            semi_major_axis_au=0.05,
+            luminosity_solar=None,  # cannot derive
+        )
+        assert resolved is None
+        assert "teff_best_k" in missing
+
+    def test_derive_eq_temperature_when_missing(self):
+        # 1 R_sun, Teff=5778, a=0.05 AU
+        # T_eq = 5778 * sqrt(R_sun / (2 * a))
+        resolved, missing, prov = resolve_retrieval_physical_parameters(
+            radius_earth=11.2,
+            mass_earth=317.8,
+            radius_solar=1.0,
+            teff_best_k=5778.0,
+            eq_temperature_k=None,  # missing
+            semi_major_axis_au=0.05,
+            luminosity_solar=1.0,
+        )
+        assert missing == []
+        assert resolved is not None
+        assert resolved["eq_temperature_k"] == pytest.approx(1246.0, rel=0.05)
+        assert prov["eq_temperature_source"] if "eq_temperature_source" in prov else prov["eq_temperature_k"] == "derived_equilibrium_zero_albedo"
+
+    def test_missing_eq_temperature_without_orbital_distance_raises_error(self):
+        resolved, missing, prov = resolve_retrieval_physical_parameters(
+            radius_earth=11.2,
+            mass_earth=317.8,
+            radius_solar=1.0,
+            teff_best_k=5778.0,
+            eq_temperature_k=None,
+            semi_major_axis_au=None,  # cannot derive
+            luminosity_solar=1.0,
+        )
+        assert resolved is None
+        assert "eq_temperature_k" in missing
+
+    def test_unphysical_inputs_rejected(self):
+        # Zero radius, negative mass, NaN Teff
+        resolved, missing, prov = resolve_retrieval_physical_parameters(
+            radius_earth=0.0,
+            mass_earth=-5.0,
+            radius_solar=float("nan"),
+            teff_best_k=-100.0,
+            eq_temperature_k=0.0,
+            semi_major_axis_au=None,
+            luminosity_solar=None,
+        )
+        assert resolved is None
+        assert "radius_earth" in missing
+        assert "mass_earth" in missing
+        assert "radius_solar" in missing
+        assert "teff_best_k" in missing
+        assert "eq_temperature_k" in missing

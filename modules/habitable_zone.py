@@ -184,7 +184,11 @@ class HabitableZoneAssessment:
     prob_conservative: Optional[float] = None
     prob_optimistic: Optional[float] = None
     probability_calculable: bool = False
+    valid_draw_fraction: float = 1.0
     invalid_draw_fraction: float = 0.0
+    is_conditional_probability: bool = False
+    domain_crossing_heuristic_threshold: float = 0.10
+    sampling_assumptions: Dict[str, Any] = field(default_factory=dict)
 
     # Planetary mass reference context
     reference_mass_earth: float = 1.0
@@ -560,7 +564,19 @@ def assess_habitable_zone(
     prob_conservative: Optional[float] = None
     prob_optimistic: Optional[float] = None
     probability_calculable = False
+    valid_draw_fraction = 1.0
     invalid_draw_fraction = 0.0
+    is_conditional_probability = False
+    domain_crossing_threshold = 0.10
+
+    sampling_assumptions = {
+        "stellar_parameter_covariance": "uncorrelated_independent_sampling",
+        "covariance_note": "Stellar radius and effective temperature errors are sampled independently; observational covariance is not modeled.",
+        "asymmetric_uncertainties": "unsupported (symmetric 1-sigma Gaussian assumed)",
+        "domain_crossing_threshold": domain_crossing_threshold,
+        "domain_crossing_note": "10% cutoff is an empirical engineering heuristic; evaluated probabilities are conditional on Teff within published Kopparapu range [2600 K, 7200 K].",
+        "conditional_domain_k": [TEFF_MIN_K, TEFF_MAX_K],
+    }
 
     has_orbit_unc = semi_major_axis_err is not None and semi_major_axis_err > 0
     has_lum_unc = lum_err_val is not None and lum_err_val > 0
@@ -605,7 +621,7 @@ def assess_habitable_zone(
             t_sigma = float(teff_err) if has_teff_unc else 0.0
 
             l_draws = np.maximum(1e-8, rng.normal(lum_val, l_sigma, n_mc_samples)) if l_sigma > 0 else np.full(n_mc_samples, lum_val)
-            t_draws = np.maximum(100.0, rng.normal(teff_k, t_sigma, n_mc_samples)) if (t_sigma > 0 and teff_k is not None) else np.full(n_mc_samples, teff_k if teff_k is not None else 5780.0)
+            t_draws = np.maximum(100.0, rng.normal(teff_k, t_sigma, n_mc_samples)) if (t_sigma > 0 and teff_k is not None) else np.full(n_mc_samples, teff_k if teff_k is not None else 0.0)
 
         # Orbit-averaged flux per draw
         geom_factors = np.sqrt(np.maximum(0.01, 1.0 - (e_draws ** 2.0)))
@@ -615,14 +631,16 @@ def assess_habitable_zone(
         out_of_domain = (t_draws < TEFF_MIN_K) | (t_draws > TEFF_MAX_K)
         out_of_domain_count = int(np.sum(out_of_domain))
         invalid_draw_fraction = round(float(out_of_domain_count / n_mc_samples), 4)
+        valid_draw_fraction = round(float(1.0 - invalid_draw_fraction), 4)
 
-        if invalid_draw_fraction > 0.10:
+        if invalid_draw_fraction > domain_crossing_threshold:
             probability_calculable = False
             prob_conservative = None
             prob_optimistic = None
             warnings.append(
                 f"{invalid_draw_fraction * 100:.1f}% of stellar effective temperature Monte Carlo draws "
-                f"fall outside published Kopparapu validity range [{TEFF_MIN_K:.0f} K, {TEFF_MAX_K:.0f} K]; "
+                f"fall outside published Kopparapu validity range [{TEFF_MIN_K:.0f} K, {TEFF_MAX_K:.0f} K] "
+                f"(exceeds {domain_crossing_threshold * 100:.0f}% heuristic threshold); "
                 f"HZ membership probabilities cannot be reliably evaluated."
             )
         else:
@@ -656,9 +674,20 @@ def assess_habitable_zone(
                 prob_conservative = round(float(in_cons_count / valid_eval_count), 4)
                 prob_optimistic = round(float(in_opt_count / valid_eval_count), 4)
                 probability_calculable = True
+                is_conditional_probability = True
     else:
         if s_avg is not None:
             warnings.append("Observational uncertainties unavailable for orbit/star; HZ probabilities cannot be evaluated.")
+
+    scientific_notes = [
+        "Incident flux calculations account for Keplerian orbital eccentricity via time-averaged flux <S_eff> = L_* / (a^2 * sqrt(1 - e^2)).",
+        "Monte Carlo uncertainty propagation samples stellar radius and effective temperature independently without observational covariance. Asymmetric catalogue errors are treated as symmetric 1-sigma standard deviations.",
+    ]
+    if is_conditional_probability:
+        scientific_notes.append(
+            f"Calculated HZ membership probabilities are conditional on stellar Teff lying within the valid Kopparapu "
+            f"parameterisation domain [{TEFF_MIN_K:.0f} K, {TEFF_MAX_K:.0f} K] (valid draw fraction: {valid_draw_fraction * 100:.1f}%)."
+        )
 
     boundaries_dict = {
         "teff_k": bounds.teff_k,
@@ -696,7 +725,11 @@ def assess_habitable_zone(
         prob_conservative=prob_conservative,
         prob_optimistic=prob_optimistic,
         probability_calculable=probability_calculable,
+        valid_draw_fraction=valid_draw_fraction,
         invalid_draw_fraction=invalid_draw_fraction,
+        is_conditional_probability=is_conditional_probability,
+        domain_crossing_heuristic_threshold=domain_crossing_threshold,
+        sampling_assumptions=sampling_assumptions,
         boundaries=boundaries_dict,
         warnings=warnings,
         scientific_notes=scientific_notes,

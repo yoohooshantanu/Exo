@@ -93,6 +93,10 @@ class ProfileHabitability(BaseModel):
     prob_optimistic: Optional[float] = None
     probability_calculable: Optional[bool] = None
     invalid_draw_fraction: Optional[float] = None
+    valid_draw_fraction: Optional[float] = None
+    is_conditional_probability: Optional[bool] = None
+    domain_crossing_heuristic_threshold: Optional[float] = None
+    sampling_assumptions: Optional[dict] = None
     reference_mass_earth: Optional[float] = None
     mass_reference_note: Optional[str] = None
     luminosity_solar: Optional[float] = None

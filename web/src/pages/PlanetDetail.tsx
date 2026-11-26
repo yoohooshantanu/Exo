@@ -353,7 +353,10 @@ export default function PlanetDetail() {
                 Incident stellar flux and temperature-dependent boundaries (Kopparapu et al. 2013, 2014)
               </CardDescription>
             </div>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="text-[10px] border-emerald-500/40 text-emerald-400">
+                1.0 M⊕ Reference Atmosphere
+              </Badge>
               {planet.habitability?.hz_boundaries?.is_valid_range === false ? (
                 <Badge variant="outline" className="text-amber-500 border-amber-500/30 text-xs">
                   Model Domain Exceeded ({planet.habitability.hz_boundaries.teff_k?.toFixed(0) ?? '—'} K)
@@ -421,7 +424,9 @@ export default function PlanetDetail() {
               </span>
               <span className="text-[10px] text-muted-foreground block mt-1">
                 {planet.habitability?.probability_calculable
-                  ? 'Monte Carlo error propagation'
+                  ? planet.habitability.is_conditional_probability
+                    ? `Conditional on Teff ∈ [2600 K, 7200 K] (${((planet.habitability.valid_draw_fraction ?? 1) * 100).toFixed(0)}% valid draws)`
+                    : 'Monte Carlo error propagation'
                   : 'Input uncertainties not in catalog'}
               </span>
             </div>
@@ -435,7 +440,9 @@ export default function PlanetDetail() {
               </span>
               <span className="text-[10px] text-muted-foreground block mt-1">
                 {planet.habitability?.probability_calculable
-                  ? 'Recent Venus – Early Mars envelope'
+                  ? planet.habitability.is_conditional_probability
+                    ? `Conditional on Teff ∈ [2600 K, 7200 K] (${((planet.habitability.valid_draw_fraction ?? 1) * 100).toFixed(0)}% valid draws)`
+                    : 'Recent Venus – Early Mars envelope'
                   : 'Input uncertainties not in catalog'}
               </span>
             </div>

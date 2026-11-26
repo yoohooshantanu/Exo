@@ -203,17 +203,26 @@ def compute_file_sha256(filepath: Union[str, Path]) -> Optional[str]:
 def verify_runtime_opacity_file(
     species: str,
     file_path: Optional[Union[str, Path]] = None,
+    loader_resolved_path: Optional[Union[str, Path]] = None,
     opacity_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """
-    Inspects runtime opacity file on disk to determine presence and calculate SHA-256 hash.
-    Decouples published literature citations from actual local binary verification.
+    Inspects runtime opacity file on disk.
+    Strictly distinguishes:
+    1. Verified runtime loader identity: Only confirmed if explicitly captured from the loader (`loader_resolved_path` or `file_path`).
+    2. Bibliographic literature attribution: Reference metadata (ExoMol, HITEMP, VALD3) from published registries.
+    Never treats a file found in an arbitrary guessed directory as proof of runtime loader usage.
     """
     known = get_known_opacity_provenance(species)
     target_path: Optional[Path] = None
+    is_direct_loader_path = False
 
-    if file_path is not None:
+    if loader_resolved_path is not None:
+        target_path = Path(loader_resolved_path).resolve()
+        is_direct_loader_path = True
+    elif file_path is not None:
         target_path = Path(file_path).resolve()
+        is_direct_loader_path = True
     elif opacity_dir is not None and known.get("file_identifier"):
         target_path = (Path(opacity_dir) / known["file_identifier"]).resolve()
 
@@ -227,20 +236,24 @@ def verify_runtime_opacity_file(
             "file_size_bytes": stat.st_size,
             "last_modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
             "provenance_verified": True,
+            "is_loader_intercepted": is_direct_loader_path,
         }
     else:
         disk_ver = {
-            "file_status": "file_not_found",
+            "file_status": "runtime_unverified" if (file_path is None and opacity_dir is None) else "file_not_found",
             "file_path": str(target_path) if target_path else None,
             "sha256_checksum": None,
             "file_size_bytes": None,
             "last_modified": None,
             "provenance_verified": False,
+            "is_loader_intercepted": False,
+            "note": "PLATON loader does not expose internal file descriptors at runtime; runtime opacity binary is unverified.",
         }
 
     result = dict(known)
     result["disk_verification"] = disk_ver
     result["runtime_file_verified"] = disk_ver["provenance_verified"]
+    result["bibliographic_metadata_only"] = True
     return result
 
 

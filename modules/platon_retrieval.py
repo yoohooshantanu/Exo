@@ -15,9 +15,11 @@ retrieval reproducibility standards (Doriann Blain / petitRADTRANS recommendatio
 """
 
 import json, uuid
+import math
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 from modules.db_sync import create_sync_engine
@@ -53,6 +55,113 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_RETRIEVAL_SEED = 42
 
 def new_id(): return str(uuid.uuid4())
+
+def resolve_retrieval_physical_parameters(
+    radius_earth: Optional[float],
+    mass_earth: Optional[float],
+    radius_solar: Optional[float],
+    teff_best_k: Optional[float],
+    eq_temperature_k: Optional[float] = None,
+    semi_major_axis_au: Optional[float] = None,
+    luminosity_solar: Optional[float] = None,
+) -> Tuple[Optional[Dict[str, float]], List[str], Dict[str, str]]:
+    """
+    Validates and resolves physical parameters required for PLATON atmospheric retrieval.
+    Never silently substitutes default values (e.g. 5000 K or 1000 K).
+    
+    Derivation rules:
+    - Teff: Used if provided, positive, and finite. If missing, derived via Stefan-Boltzmann
+      L_* = R_*^2 * (Teff / 5778)^4 if both radius_solar and luminosity_solar are available.
+    - Teq: Used if provided, positive, and finite. If missing, derived assuming zero Bond albedo
+      and uniform heat redistribution: Teq = Teff * sqrt(R_* / (2 * a)) if Teff, radius_solar,
+      and semi_major_axis_au are all valid.
+    
+    Returns:
+        (resolved_params_dict, missing_parameter_names, derivation_provenance)
+    """
+    missing: List[str] = []
+    provenance: Dict[str, str] = {}
+
+    def is_valid_num(val: Any) -> bool:
+        if val is None:
+            return False
+        try:
+            f = float(val)
+            return not (math.isnan(f) or math.isinf(f)) and f > 0
+        except (ValueError, TypeError):
+            return False
+
+    # 1. Planet Radius
+    if is_valid_num(radius_earth):
+        r_e = float(radius_earth)
+        provenance["radius_earth"] = "catalog"
+    else:
+        r_e = None
+        missing.append("radius_earth")
+
+    # 2. Planet Mass
+    if is_valid_num(mass_earth):
+        m_e = float(mass_earth)
+        provenance["mass_earth"] = "catalog"
+    else:
+        m_e = None
+        missing.append("mass_earth")
+
+    # 3. Stellar Radius
+    if is_valid_num(radius_solar):
+        r_s = float(radius_solar)
+        provenance["radius_solar"] = "catalog"
+    else:
+        r_s = None
+        missing.append("radius_solar")
+
+    # 4. Stellar Effective Temperature
+    teff: Optional[float] = None
+    if is_valid_num(teff_best_k):
+        teff = float(teff_best_k)
+        provenance["teff_k"] = "catalog"
+    elif is_valid_num(radius_solar) and is_valid_num(luminosity_solar):
+        # Derive via Stefan-Boltzmann: Teff = 5778 * (L_* / R_*^2)^(1/4)
+        derived_teff = 5778.0 * ((float(luminosity_solar) / (float(radius_solar) ** 2.0)) ** 0.25)
+        if derived_teff > 0 and not math.isnan(derived_teff):
+            teff = float(derived_teff)
+            provenance["teff_k"] = "derived_stefan_boltzmann"
+        else:
+            missing.append("teff_best_k")
+    else:
+        missing.append("teff_best_k")
+
+    # 5. Planetary Equilibrium Temperature
+    teq: Optional[float] = None
+    if is_valid_num(eq_temperature_k):
+        teq = float(eq_temperature_k)
+        provenance["eq_temperature_k"] = "catalog"
+    elif teff is not None and is_valid_num(radius_solar) and is_valid_num(semi_major_axis_au):
+        # 1 R_sun in AU = 0.00465047 AU
+        # Teq = Teff * sqrt(R_*_au / (2 * a_au))
+        r_s_au = float(radius_solar) * 0.00465047
+        sma = float(semi_major_axis_au)
+        derived_teq = teff * math.sqrt(r_s_au / (2.0 * sma))
+        if derived_teq > 0 and not math.isnan(derived_teq):
+            teq = float(derived_teq)
+            provenance["eq_temperature_k"] = "derived_equilibrium_zero_albedo"
+        else:
+            missing.append("eq_temperature_k")
+    else:
+        missing.append("eq_temperature_k")
+
+    if missing:
+        return None, missing, provenance
+
+    resolved = {
+        "radius_earth": r_e,
+        "mass_earth": m_e,
+        "radius_solar": r_s,
+        "teff_k": teff,
+        "eq_temperature_k": teq,
+    }
+    return resolved, [], provenance
+
 
 def run_platon_retrieval(
     planet_id: str,
@@ -90,8 +199,10 @@ def run_platon_retrieval(
                    MAX(CASE WHEN pp.param_name='radius_earth' THEN pp.value END) as r_e,
                    MAX(CASE WHEN pp.param_name='mass_earth' THEN pp.value END) as m_e,
                    MAX(CASE WHEN pp.param_name='eq_temperature_k' THEN pp.value END) as teq,
+                   MAX(CASE WHEN pp.param_name='semi_major_axis_au' THEN pp.value END) as sma_au,
                    MAX(CASE WHEN sp.param_name='radius_solar' THEN sp.value END) as r_s,
-                   MAX(CASE WHEN sp.param_name='teff_best_k' THEN sp.value END) as teff
+                   MAX(CASE WHEN sp.param_name='teff_best_k' THEN sp.value END) as teff,
+                   MAX(CASE WHEN sp.param_name='luminosity_solar' THEN sp.value END) as lum_s
             FROM planets p
             JOIN stars s ON p.star_id = s.star_id
             LEFT JOIN planet_parameters pp ON pp.planet_id=p.planet_id AND pp.is_default=true
@@ -100,16 +211,34 @@ def run_platon_retrieval(
             GROUP BY p.planet_name
         """), {"pid": planet_id}).fetchone()
 
-        if not phys_row or not phys_row.r_e or not phys_row.m_e or not phys_row.r_s:
-            mark_failed(retrieval_id, "Missing core physical parameters (radius, mass) for the planet/star.")
+        if not phys_row:
+            mark_failed(retrieval_id, "Planet or star record not found in database.", missing_parameters=["planet_record"])
+            return
+
+        resolved_params, missing_params, param_prov = resolve_retrieval_physical_parameters(
+            radius_earth=phys_row.r_e,
+            mass_earth=phys_row.m_e,
+            radius_solar=phys_row.r_s,
+            teff_best_k=phys_row.teff,
+            eq_temperature_k=phys_row.teq,
+            semi_major_axis_au=phys_row.sma_au,
+            luminosity_solar=phys_row.lum_s,
+        )
+
+        if not resolved_params:
+            err_msg = (
+                f"Missing required physical parameters for atmospheric retrieval: {', '.join(missing_params)}. "
+                "Silent numerical defaults (e.g. Teff=5000 K, Teq=1000 K) are strictly forbidden."
+            )
+            mark_failed(retrieval_id, err_msg, missing_parameters=missing_params)
             return
 
         planet_name = phys_row.planet_name
-        r_jup = phys_row.r_e * (R_earth / R_jup)
-        m_jup = phys_row.m_e * (M_earth / M_jup)
-        teq = phys_row.teq if phys_row.teq else 1000.0
-        teff = phys_row.teff if phys_row.teff else 5000.0
-        r_sun = phys_row.r_s
+        r_jup = resolved_params["radius_earth"] * (R_earth / R_jup)
+        m_jup = resolved_params["mass_earth"] * (M_earth / M_jup)
+        teq = resolved_params["eq_temperature_k"]
+        teff = resolved_params["teff_k"]
+        r_sun = resolved_params["radius_solar"]
 
         # 3. Setup PLATON input data
         bins = []
@@ -189,10 +318,11 @@ def run_platon_retrieval(
             model_version="1.0.0",
             chemical_species=chemical_species,
             temperature_profile_type="isothermal",
-            temperature_params={"T_guess_k": teq},
+            temperature_params={"T_guess_k": teq, "derivation_provenance": param_prov.get("eq_temperature_k", "catalog")},
             priors=priors_dict,
             sampler_name="PyMultiNest",
             random_seed=random_seed,
+            sampler_seed_deterministic=False,
             nlive=nlive,
             wavelength_range_um=(round(wl_min_total, 2), round(wl_max_total, 2)),
         )
@@ -225,7 +355,10 @@ def run_platon_retrieval(
         session.commit()
 
         # 6. Initialize Retriever and run Nested Sampling
-        print(f"\n[PLATON] Starting Nested Sampling Retrieval for spec_id={spec_id} (Seed={random_seed})")
+        # NOTE: PRNG is initialized at the host Python/NumPy level for worker isolation,
+        # but PLATON CombinedRetriever does NOT expose random seed control to the underlying
+        # MultiNest C/Fortran library. Stochastic determinism cannot be guaranteed via the public API.
+        print(f"\n[PLATON] Starting Nested Sampling Retrieval for spec_id={spec_id} (Seed={random_seed} [API non-deterministic])")
         import numpy as np
         import random, os
         if random_seed is not None:
@@ -376,16 +509,27 @@ def run_platon_retrieval(
     finally:
         session.close()
 
-def mark_failed(retrieval_id: str, error_message: str):
+def mark_failed(retrieval_id: str, error_message: str, missing_parameters: Optional[List[str]] = None):
     session = Session()
     try:
+        diag = {
+            "converged": False,
+            "error": error_message,
+            "missing_parameters": missing_parameters or [],
+            "diagnostics_notes": ["Execution aborted: physical parameter prerequisites not met."] if missing_parameters else ["Execution failed during retrieval."],
+        }
         session.execute(text("""
             UPDATE atmospheric_retrievals
             SET status = 'failed',
                 reproducibility_status = 'reproducibility_metadata_incomplete',
-                error_message = :err
+                error_message = :err,
+                convergence_diagnostics = :diag
             WHERE retrieval_id = :rid
-        """), {"err": error_message, "rid": retrieval_id})
+        """), {
+            "err": error_message,
+            "diag": json.dumps(diag),
+            "rid": retrieval_id,
+        })
         session.commit()
     except Exception:
         pass

@@ -102,8 +102,8 @@ function renderStatusBadge(status?: string) {
       )
     case 'execution_completed':
       return (
-        <Badge variant="outline" className="gap-1.5 py-1 px-2.5">
-          <CheckCircle2 className="w-3.5 h-3.5" /> Execution Completed
+        <Badge variant="outline" className="text-blue-400 border-blue-500/30 gap-1.5 py-1 px-2.5">
+          <CheckCircle2 className="w-3.5 h-3.5" /> Execution Completed (Reproducibility Unverified)
         </Badge>
       )
     default:
@@ -179,7 +179,10 @@ export function PosteriorPlots({ retrievalId, retrieval }: PosteriorPlotsProps) 
             </div>
             <div className="p-2.5 rounded border bg-background/50">
               <span className="text-muted-foreground block text-[11px] uppercase tracking-wider">Random Seed</span>
-              <span className="font-mono font-semibold text-primary">{seed != null ? seed : 'Unset'}</span>
+              <div className="flex flex-col">
+                <span className="font-mono font-semibold text-primary">{seed != null ? seed : 'Unset'}</span>
+                <span className="text-[10px] text-amber-500/80 block mt-0.5">API non-deterministic (MultiNest C-library)</span>
+              </div>
             </div>
             <div className="p-2.5 rounded border bg-background/50">
               <span className="text-muted-foreground block text-[11px] uppercase tracking-wider">Evidence ln(Z)</span>
@@ -189,6 +192,23 @@ export function PosteriorPlots({ retrievalId, retrieval }: PosteriorPlotsProps) 
               </span>
             </div>
           </div>
+
+          {/* Convergence Quality Gate Status */}
+          {diagnostics ? (
+            <div className="flex items-center gap-2 p-2.5 rounded border bg-background/50 text-xs">
+              <span className="text-muted-foreground uppercase tracking-wider text-[11px]">Convergence Status:</span>
+              {diagnostics.converged ? (
+                <span className="text-emerald-400 font-medium">Statistical Quality Gate Passed (ESS: {diagnostics.effective_sample_size?.toFixed(0) ?? 'N/A'})</span>
+              ) : (
+                <span className="text-amber-400 font-medium">Unconverged / Gate Not Passed ({diagnostics.warnings?.join('; ') || 'Diagnostics incomplete'})</span>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 p-2.5 rounded border bg-amber-500/10 border-amber-500/20 text-xs text-amber-400">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              <span>Convergence diagnostics unavailable — convergence status unverified.</span>
+            </div>
+          )}
 
           {/* Diagnostic warnings if convergence not verified */}
           {diagnostics?.warnings && diagnostics.warnings.length > 0 && (
@@ -208,9 +228,14 @@ export function PosteriorPlots({ retrievalId, retrieval }: PosteriorPlotsProps) 
           {/* Species-Level Opacity Provenance Table */}
           {opacities.length > 0 && (
             <div className="space-y-1.5">
-              <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-                <Database className="w-3.5 h-3.5 text-primary" />
-                <span>Species-Level Molecular & Atomic Opacity Provenance</span>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs font-medium text-foreground gap-1">
+                <div className="flex items-center gap-1.5">
+                  <Database className="w-3.5 h-3.5 text-primary" />
+                  <span>Species-Level Molecular & Atomic Opacity Provenance</span>
+                </div>
+                <span className="text-[10px] text-amber-500/90 font-normal">
+                  Runtime binary unverified via internal loader; reflecting bibliographic registry metadata only
+                </span>
               </div>
               <div className="rounded border overflow-x-auto">
                 <Table className="text-xs">
@@ -220,6 +245,7 @@ export function PosteriorPlots({ retrievalId, retrieval }: PosteriorPlotsProps) 
                       <TableHead className="py-2 h-7 font-medium">Database & Source</TableHead>
                       <TableHead className="py-2 h-7 font-medium">Line List / File ID</TableHead>
                       <TableHead className="py-2 h-7 font-medium">Wavelength Coverage</TableHead>
+                      <TableHead className="py-2 h-7 font-medium">Loader Verification</TableHead>
                       <TableHead className="py-2 h-7 font-medium">Known Limitations / Sensitivity</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -231,6 +257,13 @@ export function PosteriorPlots({ retrievalId, retrieval }: PosteriorPlotsProps) 
                         <TableCell className="py-1.5 font-mono text-[11px] text-muted-foreground">{op.line_list_or_file_id}</TableCell>
                         <TableCell className="py-1.5 text-muted-foreground">
                           {op.wavelength_range_um ? `${op.wavelength_range_um[0]} – ${op.wavelength_range_um[1]} µm` : '0.3 – 30.0 µm'}
+                        </TableCell>
+                        <TableCell className="py-1.5 text-[11px]">
+                          {op.runtime_loader_verified ? (
+                            <span className="text-emerald-400 font-mono">Loader Verified</span>
+                          ) : (
+                            <span className="text-amber-500/90 font-mono">Bibliographic Only</span>
+                          )}
                         </TableCell>
                         <TableCell className="py-1.5 text-muted-foreground text-[11px]">
                           {op.limitations_and_notes || 'Standard continuum/line opacity'}

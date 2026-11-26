@@ -48,7 +48,11 @@ export interface ProfileHabitability {
   prob_conservative?: number
   prob_optimistic?: number
   probability_calculable?: boolean
+  valid_draw_fraction?: number
   invalid_draw_fraction?: number
+  is_conditional_probability?: boolean
+  domain_crossing_heuristic_threshold?: number
+  sampling_assumptions?: Record<string, any>
   reference_mass_earth?: number
   mass_reference_note?: string
   luminosity_solar?: number
@@ -331,6 +335,8 @@ export interface OpacitySourceRecord {
   line_wing_cutoff_cm1?: number | null
   limitations_and_notes?: string
   provenance_verified: boolean
+  runtime_loader_verified?: boolean
+  bibliographic_metadata_only?: boolean
 }
 
 export interface ParameterPrior {

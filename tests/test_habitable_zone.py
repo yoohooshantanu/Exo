@@ -390,4 +390,27 @@ class TestHabitableZoneAssessment:
         assert res.probability_calculable is False
         assert res.prob_conservative is None
         assert res.prob_optimistic is None
+        assert res.invalid_draw_fraction > 0.10
+        assert res.domain_crossing_heuristic_threshold == 0.10
         assert any("validity range" in w.lower() or "fall outside" in w.lower() for w in res.warnings)
+
+    def test_monte_carlo_sampling_transparency_and_assumptions(self):
+        # Well-behaved star well inside [2600 K, 7200 K]
+        res = assess_habitable_zone(
+            semi_major_axis_au=1.0,
+            luminosity_solar=1.0,
+            teff_k=5780.0,
+            semi_major_axis_err=0.01,
+            luminosity_err=0.02,
+            teff_err=50.0,
+        )
+        assert res.probability_calculable is True
+        assert res.prob_conservative is not None
+        assert res.valid_draw_fraction == pytest.approx(1.0, abs=0.01)
+        assert res.invalid_draw_fraction == pytest.approx(0.0, abs=0.01)
+        assert res.is_conditional_probability is True
+        assert res.domain_crossing_heuristic_threshold == 0.10
+        assert res.sampling_assumptions is not None
+        assert res.sampling_assumptions["stellar_parameter_covariance"] == "uncorrelated_independent_sampling"
+        assert "unsupported" in res.sampling_assumptions["asymmetric_uncertainties"]
+        assert res.sampling_assumptions["domain_crossing_threshold"] == 0.10
