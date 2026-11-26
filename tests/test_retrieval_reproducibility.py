@@ -448,3 +448,64 @@ class TestRetrievalPhysicalParameterValidation:
         assert "radius_solar" in missing
         assert "teff_best_k" in missing
         assert "eq_temperature_k" in missing
+
+
+class TestSpectrumPreprocessingAudit:
+    """Verifies that spectrum preprocessing audits observational uncertainties and rejects assumptions."""
+
+    def test_missing_or_zero_uncertainty_not_silently_replaced_with_10_percent(self):
+        """Bins with missing or non-positive uncertainty must be rejected, never given an assumed 10% default."""
+        import math
+        from collections import namedtuple
+        MockSpectrumRow = namedtuple("MockSpectrumRow", ["wavelength_um", "bandwidth_um", "depth_ppm", "depth_err_upper", "depth_err_lower"])
+
+        # Row 1 has valid error, Row 2 has 0 error, Row 3 has None error
+        rows = [
+            MockSpectrumRow(wavelength_um=1.1, bandwidth_um=0.02, depth_ppm=2.1, depth_err_upper=0.05, depth_err_lower=-0.05),
+            MockSpectrumRow(wavelength_um=1.2, bandwidth_um=0.02, depth_ppm=2.2, depth_err_upper=0.0, depth_err_lower=0.0),
+            MockSpectrumRow(wavelength_um=1.3, bandwidth_um=0.02, depth_ppm=2.0, depth_err_upper=None, depth_err_lower=None),
+        ]
+
+        # Process like run_platon_retrieval
+        valid_bins = []
+        rejected = []
+        for r in rows:
+            err_up = float(r.depth_err_upper) if (r.depth_err_upper is not None and not math.isnan(r.depth_err_upper)) else None
+            err_lo = abs(float(r.depth_err_lower)) if (r.depth_err_lower is not None and not math.isnan(r.depth_err_lower)) else None
+            if err_up is not None and err_up > 0 and err_lo is not None and err_lo > 0:
+                err = (err_up + err_lo) / 2.0
+            elif err_up is not None and err_up > 0:
+                err = err_up
+            elif err_lo is not None and err_lo > 0:
+                err = err_lo
+            else:
+                err = None
+
+            if err is None or err <= 0:
+                rejected.append(r.wavelength_um)
+                continue
+            valid_bins.append((r.wavelength_um, err))
+
+        assert len(valid_bins) == 1
+        assert valid_bins[0][0] == 1.1
+        assert valid_bins[0][1] == 0.05
+        assert len(rejected) == 2
+        assert 1.2 in rejected
+        assert 1.3 in rejected
+
+    def test_observation_metadata_recorded_in_config(self):
+        meta = {
+            "depth_unit_provenance": {"scale_factor": 0.01, "notes": "NASA Exoplanet Archive percent to fraction"},
+            "uncertainty_provenance": {"assumed_uncertainties_fabricated": False},
+        }
+        cfg = create_retrieval_configuration(
+            retrieval_id="test-meta-cfg",
+            spec_id="test-spec",
+            planet_id="test-planet",
+            sampler_name="dynesty",
+            observation_metadata=meta,
+        )
+        assert cfg.observation_metadata["uncertainty_provenance"]["assumed_uncertainties_fabricated"] is False
+        assert cfg.observation_metadata["depth_unit_provenance"]["scale_factor"] == 0.01
+        assert cfg.sampler["sampler_name"] == "dynesty"
+

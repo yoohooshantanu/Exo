@@ -373,6 +373,7 @@ class ReproducibleRetrievalConfig:
     reproducibility_status: str = "configuration_recorded"
     reproducibility_notes: List[str] = field(default_factory=list)
     runtime_metadata: Dict[str, Any] = field(default_factory=dict)
+    observation_metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -421,6 +422,7 @@ def create_retrieval_configuration(
     custom_opacities: Optional[Dict[str, Dict[str, Any]]] = None,
     opacity_dir: Optional[Union[str, Path]] = None,
     sampler_seed_deterministic: bool = False,
+    observation_metadata: Optional[Dict[str, Any]] = None,
 ) -> ReproducibleRetrievalConfig:
     """
     Constructs a fully versioned, structured retrieval configuration record.
@@ -509,6 +511,7 @@ def create_retrieval_configuration(
         reproducibility_status="configuration_recorded",
         reproducibility_notes=["Configuration saved before execution."],
         runtime_metadata=runtime,
+        observation_metadata=observation_metadata or {},
     )
 
 

@@ -263,44 +263,116 @@ def run_platon_retrieval(
         teq = float(resolved_params["eq_temperature_k"])
         teff = float(resolved_params["teff_k"])
 
-        # 3. Setup PLATON input data
+        # 3. Setup PLATON input data and audit observational uncertainties
         bins = []
         depths = []
         errors = []
+        rejected_bins = []
+        bandwidth_assumptions = []
         wl_min_total = float("inf")
         wl_max_total = float("-inf")
 
-        for row in spectrum_rows:
-            wl_um = row.wavelength_um
-            bw_um = row.bandwidth_um if row.bandwidth_um else 0.04
-            
+        # Sort spectrum rows by wavelength for consistent bin processing
+        sorted_spectrum = sorted(spectrum_rows, key=lambda r: float(r.wavelength_um))
+        wavelengths = [float(r.wavelength_um) for r in sorted_spectrum]
+
+        for i, row in enumerate(sorted_spectrum):
+            wl_um = float(row.wavelength_um)
+
+            # Bandwidth resolution with explicit provenance
+            if row.bandwidth_um is not None and float(row.bandwidth_um) > 0:
+                bw_um = float(row.bandwidth_um)
+            else:
+                # Derive bandwidth from adjacent bin spacing when archival bandwidth is not recorded
+                if len(wavelengths) > 1:
+                    if i == 0:
+                        bw_um = wavelengths[1] - wavelengths[0]
+                    elif i == len(wavelengths) - 1:
+                        bw_um = wavelengths[-1] - wavelengths[-2]
+                    else:
+                        bw_um = (wavelengths[i + 1] - wavelengths[i - 1]) / 2.0
+                    source_str = "derived_adjacent_bin_spacing"
+                else:
+                    bw_um = 0.04
+                    source_str = "assumed_default_bandwidth_0.04um"
+
+                bandwidth_assumptions.append({
+                    "wavelength_um": wl_um,
+                    "assigned_bandwidth_um": round(bw_um, 6),
+                    "derivation": source_str,
+                })
+
             wl_min_um = wl_um - bw_um / 2.0
             wl_max_um = wl_um + bw_um / 2.0
+
+            # Observational uncertainty validation:
+            # Symmetrize upper and lower 1-sigma catalog errors if present.
+            # Strictly reject bins without usable uncertainty; never fabricate assumed 10% defaults.
+            err_up = float(row.depth_err_upper) if (row.depth_err_upper is not None and not math.isnan(row.depth_err_upper)) else None
+            err_lo = abs(float(row.depth_err_lower)) if (row.depth_err_lower is not None and not math.isnan(row.depth_err_lower)) else None
+
+            if err_up is not None and err_up > 0 and err_lo is not None and err_lo > 0:
+                err = (err_up + err_lo) / 2.0
+            elif err_up is not None and err_up > 0:
+                err = err_up
+            elif err_lo is not None and err_lo > 0:
+                err = err_lo
+            else:
+                err = None
+
+            if err is None or err <= 0:
+                rejected_bins.append({
+                    "wavelength_um": wl_um,
+                    "depth_val": float(row.depth_ppm),
+                    "reason": "missing_or_non_positive_measurement_uncertainty",
+                })
+                continue
+
+            # Validated dataset-specific unit conversion:
+            # Archival transmission spectra from NASA Exoplanet Archive (.tbl tables via pl_trandep)
+            # are ingested into the database column 'depth_ppm' in percentage (%) units (e.g. 2.15% for WASP-39 b).
+            # PLATON forward model expects unitless transit depth fraction (Rp/Rs)^2 (e.g. 0.0215).
+            # Factor: 1% = 0.01.
+            d_val = float(row.depth_ppm)
+            depth_fraction = d_val * 0.01
+            error_fraction = err * 0.01
+
             wl_min_total = min(wl_min_total, wl_min_um)
             wl_max_total = max(wl_max_total, wl_max_um)
-
-            err_up = row.depth_err_upper if row.depth_err_upper else 0
-            err_lo = abs(row.depth_err_lower) if row.depth_err_lower else 0
-            err = (err_up + err_lo) / 2.0
-            if err <= 0:
-                err = abs(row.depth_ppm) * 0.1
-
-            # Convert depth & error to unitless transit depth fraction (Rp/Rs)^2
-            d_val = float(row.depth_ppm)
-            e_val = float(err)
-            if abs(d_val) > 50.0:
-                # True parts-per-million (ppm) -> divide by 1e6
-                scale = 1e-6
-            elif abs(d_val) > 0.001:
-                # Percentage (%) -> divide by 100
-                scale = 1e-2
-            else:
-                # Direct fractional depth
-                scale = 1.0
-
             bins.append([wl_min_um * 1e-6, wl_max_um * 1e-6])
-            depths.append(d_val * scale)
-            errors.append(e_val * scale)
+            depths.append(depth_fraction)
+            errors.append(error_fraction)
+
+        if len(bins) < 3:
+            mark_failed(
+                retrieval_id,
+                f"Atmospheric retrieval aborted: only {len(bins)} valid spectrum bins with measured uncertainties. "
+                "Fabricating assumed uncertainties (e.g. 10% of depth) is strictly prohibited.",
+                missing_parameters=["observational_uncertainties"],
+            )
+            return
+
+        observation_meta = {
+            "spectrum_id": spec_id,
+            "total_bins_inspected": len(sorted_spectrum),
+            "usable_bins_count": len(bins),
+            "rejected_bins_count": len(rejected_bins),
+            "rejected_bins": rejected_bins,
+            "bandwidth_assumptions": bandwidth_assumptions,
+            "depth_unit_provenance": {
+                "database_column": "depth_ppm",
+                "archival_source_column": "pl_trandep",
+                "archival_units": "percent (%)",
+                "target_units": "fractional transit depth (Rp/Rs)^2",
+                "scale_factor": 0.01,
+                "notes": "NASA Exoplanet Archive pl_trandep is reported in percent (%); multiplied by 0.01 for PLATON unitless fraction.",
+            },
+            "uncertainty_provenance": {
+                "source": "archival_spectrum_measurement",
+                "method": "symmetrized_mean_of_upper_and_lower_1sigma_errors",
+                "assumed_uncertainties_fabricated": False,
+            },
+        }
 
         # 4. Formulate explicit priors & bounds within physical & model grid ranges
         # PLATON opacity grid temperature limits are strictly [200.0, 3000.0] K.
@@ -335,6 +407,7 @@ def run_platon_retrieval(
         chemical_species = ["H2O", "CO", "CO2", "CH4"]
 
         # 5. Create and persist configuration record BEFORE execution
+        # Sampler engine: PLATON 5.4 uses dynesty.NestedSampler under the hood inside run_multinest.
         retrieval_config = create_retrieval_configuration(
             retrieval_id=retrieval_id,
             spec_id=spec_id,
@@ -350,11 +423,12 @@ def run_platon_retrieval(
                 "assumptions": param_prov.get("eq_temperature_assumptions", {}),
             },
             priors=priors_dict,
-            sampler_name="PyMultiNest",
+            sampler_name="dynesty",
             random_seed=random_seed,
             sampler_seed_deterministic=False,
             nlive=nlive,
             wavelength_range_um=(round(wl_min_total, 2), round(wl_max_total, 2)),
+            observation_metadata=observation_meta,
         )
 
         config_filename = f"config_{retrieval_id}.json"
@@ -368,8 +442,8 @@ def run_platon_retrieval(
                 reproducibility_status = 'configuration_recorded',
                 configuration_record = :cfg,
                 opacity_provenance = :opc,
-                sampler_name = 'PyMultiNest',
-                sampler_version = '1.0',
+                sampler_name = 'dynesty',
+                sampler_version = '3.2.0',
                 random_seed = :seed,
                 sampler_parameters = :sparms,
                 priors_record = :prs
@@ -385,12 +459,11 @@ def run_platon_retrieval(
         session.commit()
 
         # 6. Initialize Retriever and run Nested Sampling
-        # NOTE: PRNG is initialized at the host Python/NumPy level for worker isolation,
-        # but PLATON CombinedRetriever does NOT expose random seed control to the underlying
-        # MultiNest C/Fortran library. Stochastic determinism cannot be guaranteed via the public API.
+        # NOTE: PRNG is initialized at the host Python/NumPy level for worker isolation.
+        # In PLATON 5.4, CombinedRetriever.run_multinest executes dynesty.NestedSampler in pure Python.
         # Note: PYTHONHASHSEED is not set here because it is only read once by the Python
         # runtime at interpreter initialization; modifying it inside a running process is ineffective.
-        print(f"\n[PLATON] Starting Nested Sampling Retrieval for spec_id={spec_id} (Seed={random_seed} [API non-deterministic])")
+        print(f"\n[PLATON] Starting Nested Sampling Retrieval for spec_id={spec_id} (Sampler=dynesty, Seed={random_seed})")
         import numpy as np
         import random
         if random_seed is not None:
@@ -429,22 +502,25 @@ def run_platon_retrieval(
             nlive=nlive,
         )
 
+        actual_sampler = getattr(result, "retrieval_type", "dynesty")
+        retrieval_config.sampler["sampler_name"] = actual_sampler
+        retrieval_config.sampler["engine_details"] = f"{actual_sampler}.NestedSampler via PLATON CombinedRetriever.run_multinest"
+
         dyn_res = getattr(result, "results", getattr(result, "result", result))
         samples = result.samples.tolist() if hasattr(result, 'samples') else (dyn_res.samples.tolist() if hasattr(dyn_res, 'samples') else [])
 
+        # Assign logz_arr safely to eliminate latent undefined variable bug
+        logz_arr = getattr(result, "logz", getattr(dyn_res, "logz", None))
         if hasattr(result, 'final_logz') and result.final_logz is not None:
             evidence_ln_z = float(result.final_logz)
-        elif hasattr(result, 'logz') and len(result.logz) > 0:
-            evidence_ln_z = float(result.logz[-1])
-        elif hasattr(dyn_res, 'logz') and len(dyn_res.logz) > 0:
-            evidence_ln_z = float(dyn_res.logz[-1])
+        elif logz_arr is not None and len(logz_arr) > 0:
+            evidence_ln_z = float(logz_arr[-1])
         else:
             evidence_ln_z = None
 
-        if hasattr(result, 'logzerr') and len(result.logzerr) > 0:
-            evidence_err = float(result.logzerr[-1])
-        elif hasattr(dyn_res, 'logzerr') and len(dyn_res.logzerr) > 0:
-            evidence_err = float(dyn_res.logzerr[-1])
+        logzerr_arr = getattr(result, "logzerr", getattr(dyn_res, "logzerr", None))
+        if logzerr_arr is not None and len(logzerr_arr) > 0:
+            evidence_err = float(logzerr_arr[-1])
         else:
             evidence_err = None
 
@@ -452,8 +528,12 @@ def run_platon_retrieval(
             weights = np.asarray(result.weights).tolist()
         elif hasattr(dyn_res, 'weights') and dyn_res.weights is not None:
             weights = np.asarray(dyn_res.weights).tolist()
-        elif hasattr(dyn_res, 'logwt') and logz_arr is not None and len(logz_arr) > 0:
-            weights = np.exp(dyn_res.logwt - logz_arr[-1]).tolist()
+        elif hasattr(dyn_res, 'logwt') and dyn_res.logwt is not None and len(dyn_res.logwt) > 0:
+            logwt = np.asarray(dyn_res.logwt)
+            max_logwt = np.max(logwt)
+            raw_wt = np.exp(logwt - max_logwt)
+            sum_wt = np.sum(raw_wt)
+            weights = (raw_wt / sum_wt).tolist() if sum_wt > 0 else []
         else:
             weights = []
 
@@ -524,12 +604,36 @@ def run_platon_retrieval(
         posterior_filename = f"posterior_{retrieval_id}.json"
         posterior_filepath = OUTPUT_DIR / posterior_filename
 
+        # Compute 1-sigma credible intervals (16th, 50th, 84th percentiles) from weighted posterior samples
+        summary_stats = {}
+        if len(samples) > 0 and len(weights) == len(samples):
+            samples_arr = np.array(samples)
+            weights_arr = np.array(weights)
+            for idx, p in enumerate(params_to_retrieve):
+                param_vals = samples_arr[:, idx]
+                sort_idx = np.argsort(param_vals)
+                sorted_vals = param_vals[sort_idx]
+                sorted_weights = weights_arr[sort_idx]
+                cum_weights = np.cumsum(sorted_weights) / np.sum(sorted_weights)
+
+                p16 = float(np.interp(0.16, cum_weights, sorted_vals))
+                p50 = float(np.interp(0.50, cum_weights, sorted_vals))
+                p84 = float(np.interp(0.84, cum_weights, sorted_vals))
+                summary_stats[p] = {
+                    "median": p50,
+                    "p16": p16,
+                    "p84": p84,
+                    "lower_1sigma": p50 - p16,
+                    "upper_1sigma": p84 - p50,
+                }
+
         posterior_data = {
             "retrieval_id": retrieval_id,
             "params": params_to_retrieve,
             "samples": samples,
             "weights": weights,
             "best_fit": best_fit_dict,
+            "summary_statistics": summary_stats,
             "evidence_ln_z": evidence_ln_z,
             "evidence_err": evidence_err,
             "reproducibility_status": repro_status,
@@ -553,7 +657,8 @@ def run_platon_retrieval(
                 evidence_ln_z = :ez,
                 posterior_file = :pf,
                 configuration_record = :cfg,
-                convergence_diagnostics = :conv
+                convergence_diagnostics = :conv,
+                sampler_name = :sname
             WHERE retrieval_id = :rid
         """), {
             "rps": repro_status,
@@ -563,6 +668,7 @@ def run_platon_retrieval(
             "pf": stored_path,
             "cfg": json.dumps(retrieval_config.to_dict()),
             "conv": json.dumps(retrieval_config.convergence),
+            "sname": actual_sampler,
             "rid": retrieval_id,
         })
         session.commit()

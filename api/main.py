@@ -826,7 +826,7 @@ async def start_retrieval(
             reproducibility_status, sampler_name, random_seed
         ) VALUES (
             :rid, :pid, :sid, 'PLATON_v1', '1.0.0', 'running',
-            'configuration_recorded', 'PyMultiNest', 42
+            'configuration_recorded', 'dynesty', 42
         )
     """), {"rid": retrieval_id, "pid": planet_id, "sid": spec_id})
     await session.commit()

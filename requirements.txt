@@ -50,6 +50,12 @@ statsmodels>=0.14.0
 # HITRAN
 hitran-api>=1.0.0
 
+# Atmospheric Retrieval & Forward Modelling
+platon==5.4
+dynesty==3.2.0
+corner==2.3.0
+pymultinest==2.12
+
 # Rate Limiting & Tooling
 slowapi>=0.1.9
 ruff>=0.8.0
