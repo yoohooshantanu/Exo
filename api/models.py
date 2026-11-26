@@ -59,6 +59,13 @@ class PlanetListItem(BaseModel):
     characterization_index: Optional[float] = None
     hz_score: Optional[float]
     cluster_name: Optional[str]
+    incident_stellar_flux: Optional[float] = None
+    conservative_hz: Optional[bool] = None
+    optimistic_hz: Optional[bool] = None
+    hz_classification: Optional[str] = None
+    prob_conservative: Optional[float] = None
+    prob_optimistic: Optional[float] = None
+    luminosity_source: Optional[str] = None
 
 
 class ProfileHabitability(BaseModel):
@@ -72,6 +79,21 @@ class ProfileHabitability(BaseModel):
     mass_esi_score: Optional[float]
     eccentricity_score: Optional[float] = None
     age_score: Optional[float] = None
+    incident_stellar_flux: Optional[float] = None
+    incident_stellar_flux_err: Optional[float] = None
+    flux_relative_to_earth: Optional[float] = None
+    conservative_hz: Optional[bool] = None
+    optimistic_hz: Optional[bool] = None
+    hz_classification: Optional[str] = None
+    prob_conservative: Optional[float] = None
+    prob_optimistic: Optional[float] = None
+    probability_calculable: Optional[bool] = None
+    luminosity_solar: Optional[float] = None
+    luminosity_source: Optional[str] = None
+    luminosity_err: Optional[float] = None
+    hz_boundaries: Optional[dict] = None
+    hz_warnings: Optional[List[str]] = None
+    hz_scientific_notes: Optional[List[str]] = None
 
 class ProfileBiosignatures(BaseModel):
     biosig_count: int

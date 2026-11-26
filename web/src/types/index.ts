@@ -13,6 +13,11 @@ export interface PlanetListItem {
   is_imputed?: boolean
   hz_score?: number
   cluster_name?: string
+  incident_stellar_flux?: number
+  conservative_hz?: boolean
+  optimistic_hz?: boolean
+  hz_classification?: string
+  luminosity_source?: string
   discovery_score?: number
   observability_index?: number
   physical_triage_index?: number
@@ -30,6 +35,37 @@ export interface ProfileHabitability {
   mass_esi_score?: number
   eccentricity_score?: number
   age_score?: number
+  incident_stellar_flux?: number
+  incident_stellar_flux_err?: number
+  flux_relative_to_earth?: number
+  conservative_hz?: boolean
+  optimistic_hz?: boolean
+  hz_classification?: 'conservative' | 'optimistic' | 'too_hot' | 'too_cold' | 'unknown'
+  prob_conservative?: number
+  prob_optimistic?: number
+  probability_calculable?: boolean
+  luminosity_solar?: number
+  luminosity_source?: 'catalog' | 'derived' | 'unavailable'
+  luminosity_err?: number
+  hz_boundaries?: {
+    teff_k?: number
+    is_valid_range?: boolean
+    flux_limits?: {
+      recent_venus?: number
+      runaway_greenhouse?: number
+      moist_greenhouse?: number
+      maximum_greenhouse?: number
+      early_mars?: number
+    }
+    distance_limits_au?: {
+      recent_venus?: number
+      runaway_greenhouse?: number
+      maximum_greenhouse?: number
+      early_mars?: number
+    }
+  }
+  hz_warnings?: string[]
+  hz_scientific_notes?: string[]
 }
 
 export interface ProfileBiosignatures {

@@ -196,6 +196,14 @@ class HabitabilityScore(Base):
     composite_score_iqr = Column(Float)
     is_imputed = Column(Boolean, nullable=False, server_default="false")
     hz_score = Column(Float)
+    incident_stellar_flux = Column(Float)
+    incident_stellar_flux_err = Column(Float)
+    hz_conservative = Column(Boolean)
+    hz_optimistic = Column(Boolean)
+    hz_prob_conservative = Column(Float)
+    hz_prob_optimistic = Column(Float)
+    luminosity_solar = Column(Float)
+    luminosity_source = Column(Text)
     teq_score = Column(Float)
     radius_esi_score = Column(Float)
     mass_esi_score = Column(Float)
@@ -372,11 +380,22 @@ class AtmosphericRetrieval(Base):
                        nullable=False, index=True)
     spec_id = Column(Text, nullable=False, index=True)
     model_name = Column(Text, nullable=False) # e.g. "PLATON_v1"
+    model_version = Column(Text)
     run_time_seconds = Column(Float)
     best_fit_params = Column(JSONB) # e.g. {"metallicity": 1.0, "C/O": 0.5, "cloud_top_pressure": 1e4}
     evidence_ln_z = Column(Float)
     posterior_file = Column(Text) # Path to saved posterior data (e.g. JSON or NPZ)
     status = Column(Text, server_default="running") # running, completed, failed
+    reproducibility_status = Column(Text, server_default="configuration_recorded") # configuration_recorded, execution_completed, reproducibility_metadata_incomplete, convergence_not_established, reproducibility_verified
+    configuration_record = Column(JSONB)
+    opacity_provenance = Column(JSONB)
+    sampler_name = Column(Text)
+    sampler_version = Column(Text)
+    random_seed = Column(Integer)
+    sampler_parameters = Column(JSONB)
+    priors_record = Column(JSONB)
+    temperature_profile_record = Column(JSONB)
+    convergence_diagnostics = Column(JSONB)
     error_message = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=text("now()"))
 

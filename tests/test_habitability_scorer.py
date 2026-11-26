@@ -108,19 +108,37 @@ class TestScoreHz:
         """Earth at 1 AU around a solar-luminosity star."""
         score = score_hz(1.0, 0.0)  # log(L) = 0 → L = 1.0 solar
         assert score is not None
-        assert score > 0.5  # Earth is inside the HZ but not at the midpoint (~1.35 AU)
+        assert score == 1.0  # Conservative HZ membership
+
+    def test_no_midpoint_distance_reward(self):
+        """Verify removal of midpoint scoring: planets inside conservative HZ score 1.0 equally."""
+        score_earth = score_hz(1.0, 0.0)
+        score_mid = score_hz(1.35, 0.0)
+        assert score_earth == 1.0
+        assert score_mid == 1.0
+
+    def test_optimistic_boundary_scores_point_five(self):
+        """Planet in optimistic extension scores 0.5."""
+        # Venus-like incident flux ~ 1.40 -> a ~ 0.845 AU
+        score = score_hz(0.845, 0.0)
+        assert score == 0.5
 
     def test_too_close_scores_low(self):
         """Planet at 0.1 AU (inside inner HZ)."""
         score = score_hz(0.1, 0.0)
         assert score is not None
-        assert score < 0.5
+        assert score == 0.0
 
     def test_too_far_scores_low(self):
         """Planet at 5 AU (outside outer HZ)."""
         score = score_hz(5.0, 0.0)
         assert score is not None
-        assert score < 0.5
+        assert score == 0.0
+
+    def test_m_dwarf_derived_luminosity(self):
+        """M-dwarf HZ evaluated using derived luminosity from radius and Teff."""
+        score = score_hz(0.0485, lum_log=None, teff_k=3050.0, radius_solar=0.1542)
+        assert score in (1.0, 0.5)
 
     def test_none_returns_none(self):
         assert score_hz(None, 0.0) is None

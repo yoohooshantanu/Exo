@@ -344,6 +344,32 @@ async def get_planet(request: Request, planet_name: str, session: AsyncSession =
     system_planets = [SystemPlanetItem(**dict(r)) for r in sys_planets_rows]
     orbital_gaps = [OrbitalGapItem(**dict(r)) for r in sys_gaps_rows]
 
+    # Habitable zone assessment resolution
+    hz_assessment = None
+    if d.get("incident_stellar_flux") is None and d.get("semi_major_axis_au") is not None:
+        from modules.habitable_zone import assess_habitable_zone
+        hz_assessment = assess_habitable_zone(
+            semi_major_axis_au=d.get("semi_major_axis_au"),
+            luminosity_log10=d.get("star_luminosity_solar"),
+            radius_solar=d.get("radius_solar"),
+            teff_k=d.get("teff_best_k"),
+        )
+
+    s_eff = d.get("incident_stellar_flux") if d.get("incident_stellar_flux") is not None else (hz_assessment.incident_stellar_flux if hz_assessment else None)
+    s_eff_err = d.get("incident_stellar_flux_err") if d.get("incident_stellar_flux_err") is not None else (hz_assessment.incident_stellar_flux_err if hz_assessment else None)
+    cons_hz = d.get("conservative_hz") if d.get("conservative_hz") is not None else (hz_assessment.conservative_hz if hz_assessment else None)
+    opt_hz = d.get("optimistic_hz") if d.get("optimistic_hz") is not None else (hz_assessment.optimistic_hz if hz_assessment else None)
+    hz_class = d.get("hz_classification") if d.get("hz_classification") is not None else (hz_assessment.hz_classification if hz_assessment else None)
+    p_cons = d.get("prob_conservative") if d.get("prob_conservative") is not None else (hz_assessment.prob_conservative if hz_assessment else None)
+    p_opt = d.get("prob_optimistic") if d.get("prob_optimistic") is not None else (hz_assessment.prob_optimistic if hz_assessment else None)
+    p_calc = (p_cons is not None or p_opt is not None) if d.get("probability_calculable") is None else d.get("probability_calculable")
+    lum_val = d.get("hz_luminosity_solar") if d.get("hz_luminosity_solar") is not None else (hz_assessment.luminosity_solar if hz_assessment else None)
+    lum_src = d.get("hz_luminosity_source") if d.get("hz_luminosity_source") is not None else (hz_assessment.luminosity_source if hz_assessment else None)
+    lum_err = d.get("hz_luminosity_err") if d.get("hz_luminosity_err") is not None else (hz_assessment.luminosity_err if hz_assessment else None)
+    hz_bounds = d.get("hz_boundaries") if d.get("hz_boundaries") is not None else (hz_assessment.boundaries if hz_assessment else None)
+    hz_warn = d.get("hz_warnings") if d.get("hz_warnings") is not None else (hz_assessment.warnings if hz_assessment else [])
+    hz_notes = d.get("hz_scientific_notes") if d.get("hz_scientific_notes") is not None else (hz_assessment.scientific_notes if hz_assessment else [])
+
     habitability = ProfileHabitability(
         composite_score=d.get("composite_score"),
         composite_score_iqr=d.get("composite_score_iqr"),
@@ -355,6 +381,21 @@ async def get_planet(request: Request, planet_name: str, session: AsyncSession =
         mass_esi_score=d.get("mass_esi_score"),
         eccentricity_score=d.get("eccentricity_score"),
         age_score=d.get("age_score"),
+        incident_stellar_flux=s_eff,
+        incident_stellar_flux_err=s_eff_err,
+        flux_relative_to_earth=s_eff,
+        conservative_hz=cons_hz,
+        optimistic_hz=opt_hz,
+        hz_classification=hz_class,
+        prob_conservative=p_cons,
+        prob_optimistic=p_opt,
+        probability_calculable=p_calc,
+        luminosity_solar=lum_val,
+        luminosity_source=lum_src,
+        luminosity_err=lum_err,
+        hz_boundaries=hz_bounds,
+        hz_warnings=hz_warn,
+        hz_scientific_notes=hz_notes,
     )
 
     biosignatures = ProfileBiosignatures(
@@ -629,8 +670,14 @@ async def get_priority_target(session: AsyncSession = Depends(get_db)):
     parts = []
     if d.get("cluster_name"):
         parts.append(d["cluster_name"])
-    if d.get("hz_score") and d["hz_score"] > 0.8:
-        parts.append("within habitable zone")
+    if d.get("conservative_hz"):
+        parts.append("within conservative habitable zone (flux-based)")
+    elif d.get("optimistic_hz"):
+        parts.append("within optimistic habitable zone (flux-based)")
+    elif d.get("hz_score") and d["hz_score"] >= 1.0:
+        parts.append("within conservative habitable zone")
+    elif d.get("hz_score") and d["hz_score"] >= 0.5:
+        parts.append("within optimistic habitable zone")
     if d.get("eq_temperature_k"):
         parts.append(f"T_eq {d['eq_temperature_k']:.0f} K")
     if d.get("molecules_detected"):

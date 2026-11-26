@@ -54,7 +54,7 @@ export default function PlanetDetailPanel({ name }: { name: string }) {
           ['Period', planet.period_days, 'd'],
           ['SMA', planet.semi_major_axis_au, 'AU'],
           ['T_eq', planet.eq_temperature_k, 'K'],
-          ['Ecc', planet.eccentricity, ''],
+          ['Flux (S_eff)', planet.habitability.incident_stellar_flux, 'S⊕'],
         ].map(([label, val, unit]) => (
           <div key={label as string}>
             <p className="text-xs text-muted-foreground uppercase tracking-wider">{label as string}</p>

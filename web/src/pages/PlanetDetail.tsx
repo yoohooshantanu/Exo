@@ -227,15 +227,29 @@ export default function PlanetDetail() {
       {/* ── Key Scores — simple stat cards matching reference ─────── */}
       <div className="grid grid-cols-3 gap-4">
         {[
-          { val: planet.habitability?.similarity_score ?? 0, label: 'Similarity', desc: 'Earth Similarity Index' },
-          { val: planet.anomaly_risk?.safety_score ?? 0, label: 'Safety', desc: 'Environmental safety factor' },
-          { val: planet.habitability?.hz_score ?? 0, label: 'HZ Position', desc: 'Habitable zone proximity' },
+          { 
+            val: planet.habitability?.similarity_score != null ? planet.habitability.similarity_score.toFixed(3) : '—', 
+            label: 'Similarity', 
+            desc: 'Earth Similarity Index' 
+          },
+          { 
+            val: planet.anomaly_risk?.safety_score != null ? planet.anomaly_risk.safety_score.toFixed(3) : '—', 
+            label: 'Safety', 
+            desc: 'Environmental safety factor' 
+          },
+          { 
+            val: planet.habitability?.incident_stellar_flux != null 
+              ? `${planet.habitability.incident_stellar_flux.toFixed(2)}${planet.habitability.incident_stellar_flux_err != null ? ` ± ${planet.habitability.incident_stellar_flux_err.toFixed(2)}` : ''} S⊕` 
+              : (planet.habitability?.conservative_hz ? 'Inside HZ' : (planet.habitability?.hz_classification ? planet.habitability.hz_classification.replace('_', ' ').toUpperCase() : '—')), 
+            label: 'Incident Flux (S_eff)', 
+            desc: planet.habitability?.conservative_hz ? 'Conservative HZ' : (planet.habitability?.optimistic_hz ? 'Optimistic HZ' : (planet.habitability?.hz_classification ? `Status: ${planet.habitability.hz_classification.replace('_', ' ')}` : 'Incident stellar flux')) 
+          },
         ].map((g) => (
           <Card key={g.label}>
             <CardHeader className="pb-2">
               <CardDescription className="text-xs">{g.label}</CardDescription>
               <CardTitle className="text-2xl font-light tracking-tight font-data">
-                {g.val.toFixed(3)}
+                {g.val}
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-0">
@@ -328,6 +342,147 @@ export default function PlanetDetail() {
           </CardContent>
         </Card>
       </div>
+
+      {/* ── Scientifically Rigorous Habitable-Zone Assessment ─────── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-sm font-medium">Habitable-Zone Assessment</CardTitle>
+              <CardDescription>
+                Incident stellar flux and temperature-dependent boundaries (Kopparapu et al. 2013, 2014)
+              </CardDescription>
+            </div>
+            <div className="flex gap-2">
+              {planet.habitability?.conservative_hz ? (
+                <Badge variant="default" className="bg-emerald-600 hover:bg-emerald-700 text-xs">
+                  Conservative HZ
+                </Badge>
+              ) : planet.habitability?.optimistic_hz ? (
+                <Badge variant="secondary" className="bg-blue-600/20 text-blue-400 border border-blue-500/30 text-xs">
+                  Optimistic HZ
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-muted-foreground text-xs">
+                  {planet.habitability?.hz_classification ? planet.habitability.hz_classification.replace('_', ' ').toUpperCase() : 'Outside HZ'}
+                </Badge>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="p-3 bg-secondary/15 rounded-md border">
+              <span className="text-xs text-muted-foreground block">Incident Stellar Flux (S_eff)</span>
+              <span className="text-lg font-data font-medium">
+                {planet.habitability?.incident_stellar_flux != null
+                  ? `${planet.habitability.incident_stellar_flux.toFixed(2)}${planet.habitability.incident_stellar_flux_err != null ? ` ± ${planet.habitability.incident_stellar_flux_err.toFixed(2)}` : ''} S⊕`
+                  : '—'}
+              </span>
+              <span className="text-[10px] text-muted-foreground block mt-1">Relative to Earth (L_* / a²)</span>
+            </div>
+
+            <div className="p-3 bg-secondary/15 rounded-md border">
+              <span className="text-xs text-muted-foreground block">Stellar Luminosity (L_*)</span>
+              <span className="text-lg font-data font-medium">
+                {planet.habitability?.luminosity_solar != null
+                  ? `${planet.habitability.luminosity_solar.toFixed(4)} L☉`
+                  : '—'}
+              </span>
+              <div className="mt-1">
+                {planet.habitability?.luminosity_source === 'catalog' && (
+                  <Badge variant="outline" className="text-[9px] border-emerald-500/50 text-emerald-400">Catalogue Direct</Badge>
+                )}
+                {planet.habitability?.luminosity_source === 'derived' && (
+                  <Badge variant="outline" className="text-[9px] border-cyan-500/50 text-cyan-400" title="Derived via Stefan-Boltzmann L_* = R_*^2 (T_eff / T_sun)^4">Derived (Stefan-Boltzmann)</Badge>
+                )}
+                {planet.habitability?.luminosity_source === 'unavailable' && (
+                  <Badge variant="outline" className="text-[9px] border-amber-500/50 text-amber-400">Unavailable</Badge>
+                )}
+              </div>
+            </div>
+
+            <div className="p-3 bg-secondary/15 rounded-md border">
+              <span className="text-xs text-muted-foreground block">Conservative HZ Probability</span>
+              <span className="text-lg font-data font-medium">
+                {planet.habitability?.prob_conservative != null
+                  ? `${(planet.habitability.prob_conservative * 100).toFixed(1)}%`
+                  : 'Uncertainty N/A'}
+              </span>
+              <span className="text-[10px] text-muted-foreground block mt-1">
+                {planet.habitability?.probability_calculable
+                  ? 'Monte Carlo error propagation'
+                  : 'Input uncertainties not in catalog'}
+              </span>
+            </div>
+
+            <div className="p-3 bg-secondary/15 rounded-md border">
+              <span className="text-xs text-muted-foreground block">Optimistic HZ Probability</span>
+              <span className="text-lg font-data font-medium">
+                {planet.habitability?.prob_optimistic != null
+                  ? `${(planet.habitability.prob_optimistic * 100).toFixed(1)}%`
+                  : 'Uncertainty N/A'}
+              </span>
+              <span className="text-[10px] text-muted-foreground block mt-1">
+                {planet.habitability?.probability_calculable
+                  ? 'Recent Venus – Early Mars envelope'
+                  : 'Input uncertainties not in catalog'}
+              </span>
+            </div>
+          </div>
+
+          {planet.habitability?.hz_boundaries?.flux_limits && (
+            <div className="border rounded-md p-3 bg-card text-xs">
+              <span className="font-medium text-foreground block mb-2">
+                Published Kopparapu Boundaries (Teff = {planet.habitability.hz_boundaries.teff_k?.toFixed(0) ?? '—'} K)
+              </span>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] font-data">
+                <div className="p-2 bg-secondary/10 rounded">
+                  <span className="text-muted-foreground block">Recent Venus (Opt. Inner)</span>
+                  <span className="font-semibold">{planet.habitability.hz_boundaries.flux_limits.recent_venus?.toFixed(2) ?? '—'} S⊕</span>
+                  <span className="text-[10px] text-muted-foreground block">({planet.habitability.hz_boundaries.distance_limits_au?.recent_venus?.toFixed(3) ?? '—'} AU)</span>
+                </div>
+                <div className="p-2 bg-secondary/10 rounded">
+                  <span className="text-muted-foreground block">Runaway Greenhouse (Cons. Inner)</span>
+                  <span className="font-semibold text-emerald-400">{planet.habitability.hz_boundaries.flux_limits.runaway_greenhouse?.toFixed(2) ?? '—'} S⊕</span>
+                  <span className="text-[10px] text-muted-foreground block">({planet.habitability.hz_boundaries.distance_limits_au?.runaway_greenhouse?.toFixed(3) ?? '—'} AU)</span>
+                </div>
+                <div className="p-2 bg-secondary/10 rounded">
+                  <span className="text-muted-foreground block">Max Greenhouse (Cons. Outer)</span>
+                  <span className="font-semibold text-emerald-400">{planet.habitability.hz_boundaries.flux_limits.maximum_greenhouse?.toFixed(2) ?? '—'} S⊕</span>
+                  <span className="text-[10px] text-muted-foreground block">({planet.habitability.hz_boundaries.distance_limits_au?.maximum_greenhouse?.toFixed(3) ?? '—'} AU)</span>
+                </div>
+                <div className="p-2 bg-secondary/10 rounded">
+                  <span className="text-muted-foreground block">Early Mars (Opt. Outer)</span>
+                  <span className="font-semibold">{planet.habitability.hz_boundaries.flux_limits.early_mars?.toFixed(2) ?? '—'} S⊕</span>
+                  <span className="text-[10px] text-muted-foreground block">({planet.habitability.hz_boundaries.distance_limits_au?.early_mars?.toFixed(3) ?? '—'} AU)</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {planet.habitability?.hz_warnings && planet.habitability.hz_warnings.length > 0 && (
+            <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400 space-y-1">
+              <div className="flex items-center gap-1.5 font-medium">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>Habitable Zone Uncertainty & Limitations</span>
+              </div>
+              <ul className="list-disc list-inside text-[11px] text-amber-300/80 space-y-0.5">
+                {planet.habitability.hz_warnings.map((w, idx) => (
+                  <li key={idx}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="p-3 bg-secondary/10 border rounded-md text-[11px] text-muted-foreground flex items-start gap-2">
+            <span className="font-semibold text-foreground shrink-0">Scientific Caveat:</span>
+            <span>
+              Habitable-zone membership is solely an astronomical metric of incident stellar flux where liquid surface water could theoretically be sustained on an Earth-like planet with an atmosphere. It does <strong>not</strong> prove the presence of an atmosphere, water, or habitability.
+            </span>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* ── System Architecture & Orbital Gaps ──────────────────── */}
       {systemArchitectureItems.length > 0 && (

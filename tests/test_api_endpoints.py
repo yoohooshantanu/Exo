@@ -201,6 +201,84 @@ class TestPlanetDetailEndpoint:
         assert response.status_code == 404
         app.dependency_overrides.clear()
 
+    def test_planet_detail_returns_hz_scientific_fields(self):
+        client, session, app = _get_test_client()
+
+        detail_mock = MagicMock()
+        detail_mock.mappings.return_value.one_or_none.return_value = {
+            "planet_name": "TRAPPIST-1 e",
+            "planet_id": "test-planet-id",
+            "hostname": "TRAPPIST-1",
+            "star_id": "test-star-id",
+            "status": "confirmed",
+            "discovery_method": "Transit",
+            "discovery_year": 2017,
+            "radius_earth": 0.92,
+            "mass_earth": 0.69,
+            "period_days": 6.10,
+            "eq_temperature_k": 251.0,
+            "semi_major_axis_au": 0.0293,
+            "eccentricity": 0.006,
+            "density_earth": 0.88,
+            "composite_score": 0.85,
+            "composite_score_iqr": 0.04,
+            "is_imputed": False,
+            "hz_score": 1.0,
+            "incident_stellar_flux": 0.66,
+            "incident_stellar_flux_err": 0.03,
+            "conservative_hz": True,
+            "optimistic_hz": True,
+            "hz_classification": "conservative",
+            "prob_conservative": 0.94,
+            "prob_optimistic": 0.99,
+            "hz_luminosity_solar": 0.00055,
+            "hz_luminosity_source": "derived",
+            "teq_score": 0.95,
+            "radius_esi_score": 0.98,
+            "mass_esi_score": 0.94,
+            "tidal_lock_score": 0.05,
+            "xuv_escape_score": 0.70,
+            "eccentricity_score": 0.99,
+            "age_score": 0.80,
+            "similarity_score": 0.95,
+            "safety_score": 0.55,
+            "cluster_label": 1,
+            "cluster_name": "Temperate Terrestrial",
+            "distance_to_centroid": 0.12,
+            "discovery_score": 82.5,
+            "observability_index": 75.0,
+            "physical_triage_index": 85.0,
+            "characterization_index": 78.0,
+        }
+
+        empty_list_mock = MagicMock()
+        empty_list_mock.mappings.return_value.all.return_value = []
+
+        session.execute.side_effect = [
+            detail_mock,
+            empty_list_mock,  # anomalies
+            empty_list_mock,  # biosigs
+            empty_list_mock,  # spectra
+            empty_list_mock,  # sys_planets
+            empty_list_mock,  # sys_gaps
+            empty_list_mock,  # prov
+        ]
+
+        response = client.get("/api/planets/TRAPPIST-1%20e")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["planet_name"] == "TRAPPIST-1 e"
+        assert "habitability" in data
+        hab = data["habitability"]
+        assert hab["incident_stellar_flux"] == 0.66
+        assert hab["incident_stellar_flux_err"] == 0.03
+        assert hab["conservative_hz"] is True
+        assert hab["optimistic_hz"] is True
+        assert hab["hz_classification"] == "conservative"
+        assert hab["prob_conservative"] == 0.94
+        assert hab["luminosity_source"] == "derived"
+        app.dependency_overrides.clear()
+
 
 # ── CORS Headers ─────────────────────────────────────────────────────────────
 

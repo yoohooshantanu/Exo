@@ -42,6 +42,7 @@ Session      = sessionmaker(bind=engine)
 
 from modules.config import HABITABILITY_MODEL_VERSION as MODEL_VERSION
 from modules.utils import nv
+from modules.habitable_zone import assess_habitable_zone, resolve_stellar_luminosity
 SIMILARITY_WEIGHT   = 0.70
 SAFETY_WEIGHT       = 0.30
 
@@ -149,34 +150,47 @@ def score_flare(teff):
 # Source: Kopparapu, R. K., et al. (2013). "Habitable Zones Around Main-
 #         Sequence Stars: New Estimates." ApJ, 765:131.
 #         doi:10.1088/0004-637X/765/2/131
-# Classification: LITERATURE-DERIVED
-# Inner = moist greenhouse limit, Outer = maximum greenhouse limit.
-# Scaled by sqrt(L/L_sun) for other stellar luminosities.
 HZ_INNER_SUN = 0.99
 HZ_OUTER_SUN = 1.70
 BOND_ALBEDO  = 0.30   # Earth's Bond albedo — Stephens et al. (2015), Nat Geosci 8:580
 
-def derive_teq(a_au, lum_log):
+def derive_teq(a_au, lum_log=None, radius_solar=None, teff_k=None):
     a = nv(a_au)
     if a is None or a <= 0: return None
-    lum = 10 ** nv(lum_log) if nv(lum_log) is not None else 1.0
+    lum_res = resolve_stellar_luminosity(
+        luminosity_log10=nv(lum_log),
+        radius_solar=nv(radius_solar),
+        teff_k=nv(teff_k),
+    )
+    lum = lum_res.luminosity_solar
+    if lum is None or lum <= 0:
+        return None
     return round(278.5 * (lum**0.25) * ((1 - BOND_ALBEDO)**0.25) / math.sqrt(a), 2)
 
-def score_hz(a_au, lum_log):
-    """HZ score — still computed and stored for display, but NOT part of similarity."""
+def score_hz(a_au, lum_log=None, teff_k=None, radius_solar=None):
+    """
+    Habitable-zone assessment based on Kopparapu et al. (2013, 2014).
+    Calculates temperature-dependent flux boundaries.
+    Returns 1.0 for conservative HZ, 0.5 for optimistic HZ, 0.0 outside HZ, or None if uncalculable.
+    Midpoint distance scoring rewards have been completely removed.
+    """
     a = nv(a_au)
-    if a is None: return None
-    lum = 10 ** nv(lum_log) if nv(lum_log) is not None else 1.0
-    scale    = math.sqrt(lum)
-    hz_inner = HZ_INNER_SUN * scale
-    hz_outer = HZ_OUTER_SUN * scale
-    hz_mid   = (hz_inner + hz_outer) / 2.0
-    hz_half  = (hz_outer - hz_inner) / 2.0
-    if a < hz_inner:
-        return float(max(0.0, 1.0 - (hz_inner - a) / hz_inner))
-    if a > hz_outer:
-        return float(max(0.0, 1.0 - (a - hz_outer) / hz_outer))
-    return float(min(1.0, max(0.0, 1.0 - abs(a - hz_mid) / hz_half * 0.4)))
+    if a is None or a <= 0:
+        return None
+    teff = nv(teff_k) if teff_k is not None else 5780.0
+    res = assess_habitable_zone(
+        semi_major_axis_au=a,
+        luminosity_log10=nv(lum_log),
+        radius_solar=nv(radius_solar),
+        teff_k=teff,
+    )
+    if res.conservative_hz:
+        return 1.0
+    elif res.optimistic_hz:
+        return 0.5
+    elif res.hz_classification in ("too_hot", "too_cold"):
+        return 0.0
+    return None
 
 def esi_component(value, earth_ref, weight_exp):
     v = nv(value)
@@ -422,16 +436,35 @@ def weighted_average(scores: dict, weights: dict) -> float | None:
 
 
 def _compute_score_planet(row: pd.Series) -> dict:
-    a_au    = nv(row.get("semi_major_axis_au"))
-    lum_log = nv(row.get("luminosity_solar"))
-    period  = nv(row.get("period_days"))
-    mstar   = nv(row.get("mass_solar"))
-    teff    = nv(row.get("teff_best_k"))
-    ecc     = nv(row.get("eccentricity"))
-    rade    = nv(row.get("radius_earth"))
-    masse   = nv(row.get("mass_earth"))
-    teq     = nv(row.get("eq_temperature_k")) or derive_teq(a_au, lum_log)
-    age     = nv(row.get("age_gaia_gyr")) or nv(row.get("age_nasa_gyr"))
+    a_au     = nv(row.get("semi_major_axis_au"))
+    lum_log  = nv(row.get("luminosity_solar"))
+    rad_star = nv(row.get("radius_solar"))
+    period   = nv(row.get("period_days"))
+    mstar    = nv(row.get("mass_solar"))
+    teff     = nv(row.get("teff_best_k"))
+    ecc      = nv(row.get("eccentricity"))
+    rade     = nv(row.get("radius_earth"))
+    masse    = nv(row.get("mass_earth"))
+    teq      = nv(row.get("eq_temperature_k")) or derive_teq(a_au, lum_log, rad_star, teff)
+    age      = nv(row.get("age_gaia_gyr")) or nv(row.get("age_nasa_gyr"))
+
+    # Full Kopparapu habitable-zone assessment
+    a_err = nv(row.get("semi_major_axis_err"))
+    lum_err = nv(row.get("luminosity_solar_err"))
+    rad_star_err = nv(row.get("radius_solar_err"))
+    teff_err = nv(row.get("teff_err"))
+
+    hz_assessment = assess_habitable_zone(
+        semi_major_axis_au=a_au,
+        luminosity_log10=lum_log,
+        radius_solar=rad_star,
+        teff_k=teff,
+        semi_major_axis_err=a_err,
+        luminosity_err=lum_err,
+        radius_err=rad_star_err,
+        teff_err=teff_err,
+    )
+    hz_val = 1.0 if hz_assessment.conservative_hz else (0.5 if hz_assessment.optimistic_hz else (0.0 if hz_assessment.hz_classification in ("too_hot", "too_cold") else None))
 
     # ── Track 1: Similarity (ESI-based) ────────────────────────────────────────
     masse_for_esi = masse
@@ -446,7 +479,6 @@ def _compute_score_planet(row: pd.Series) -> dict:
     if masse is not None and rade is not None and rade > 0:
         rho = masse / (rade ** 3)
     
-    hz_val     = score_hz(a_au, lum_log)
     teq_val    = score_teq(teq_mid, delta_t)
     rad_val    = score_radius(rade)
     mass_val   = score_mass(masse)
@@ -504,6 +536,7 @@ def _compute_score_planet(row: pd.Series) -> dict:
             "a_au": a_au, "lum_log": lum_log, "period_days": period,
             "mstar": mstar, "teff_k": teff, "eccentricity": ecc,
             "radius_earth": rade, "mass_earth": masse, "teq_k": teq, "age_gyr": age,
+            "radius_solar": rad_star,
             "is_imputed": (masse is None and rade is not None),
             "mass_imputed": (masse is None and rade is not None),
         },
@@ -511,21 +544,46 @@ def _compute_score_planet(row: pd.Series) -> dict:
         "safety":       {k: round(v, 4) if v is not None else None for k, v in raw_safety.items()},
         "sim_score":    round(sim_score, 4) if sim_score is not None else None,
         "safety_score": round(safety_score, 4) if safety_score is not None else None,
+        "hz_assessment": {
+            "incident_stellar_flux": hz_assessment.incident_stellar_flux,
+            "incident_stellar_flux_err": hz_assessment.incident_stellar_flux_err,
+            "flux_relative_to_earth": hz_assessment.flux_relative_to_earth,
+            "luminosity_solar": hz_assessment.luminosity_solar,
+            "luminosity_source": hz_assessment.luminosity_source,
+            "luminosity_err": hz_assessment.luminosity_err,
+            "conservative_hz": hz_assessment.conservative_hz,
+            "optimistic_hz": hz_assessment.optimistic_hz,
+            "hz_classification": hz_assessment.hz_classification,
+            "prob_conservative": hz_assessment.prob_conservative,
+            "prob_optimistic": hz_assessment.prob_optimistic,
+            "probability_calculable": hz_assessment.probability_calculable,
+            "boundaries": hz_assessment.boundaries,
+            "warnings": hz_assessment.warnings,
+            "scientific_notes": hz_assessment.scientific_notes,
+        },
     }
 
     return {
-        "composite_score":    composite,
-        "hz_score":           hz_val,
-        "teq_score":          teq_val,
-        "radius_esi_score":   rad_val,
-        "mass_esi_score":     mass_val,
-        "tidal_lock_score":   raw_safety["tidal_lock_score"],
-        "xuv_escape_score":   raw_safety["xuv_escape_score"],
-        "eccentricity_score": raw_safety["ecc_score"],
-        "age_score":          raw_safety["age_score"],
-        "similarity_score":   sim_score,
-        "safety_score":       safety_score,
-        "input_snapshot":     json.dumps(snapshot),
+        "composite_score":          composite,
+        "hz_score":                 hz_val,
+        "incident_stellar_flux":    hz_assessment.incident_stellar_flux,
+        "incident_stellar_flux_err": hz_assessment.incident_stellar_flux_err,
+        "hz_conservative":          hz_assessment.conservative_hz,
+        "hz_optimistic":            hz_assessment.optimistic_hz,
+        "hz_prob_conservative":     hz_assessment.prob_conservative,
+        "hz_prob_optimistic":       hz_assessment.prob_optimistic,
+        "luminosity_solar":         hz_assessment.luminosity_solar,
+        "luminosity_source":        hz_assessment.luminosity_source,
+        "teq_score":                teq_val,
+        "radius_esi_score":         rad_val,
+        "mass_esi_score":           mass_val,
+        "tidal_lock_score":         raw_safety["tidal_lock_score"],
+        "xuv_escape_score":         raw_safety["xuv_escape_score"],
+        "eccentricity_score":       raw_safety["ecc_score"],
+        "age_score":                raw_safety["age_score"],
+        "similarity_score":         sim_score,
+        "safety_score":             safety_score,
+        "input_snapshot":           json.dumps(snapshot),
     }
 
 
@@ -589,6 +647,7 @@ def fetch_planets(session) -> pd.DataFrame:
             MAX(CASE WHEN pp.param_name='eq_temperature_k'    THEN pp.value END) AS eq_temperature_k,
             MAX(CASE WHEN sp.param_name='teff_best_k'         THEN sp.value END) AS teff_best_k,
             MAX(CASE WHEN sp.param_name='luminosity_solar'    THEN sp.value END) AS luminosity_solar,
+            MAX(CASE WHEN sp.param_name='radius_solar'        THEN sp.value END) AS radius_solar,
             MAX(CASE WHEN sp.param_name='mass_solar'          THEN sp.value END) AS mass_solar,
             MAX(CASE WHEN sp.param_name='age_gaia_gyr'        THEN sp.value END) AS age_gaia_gyr,
             MAX(CASE WHEN sp.param_name='age_nasa_gyr'        THEN sp.value END) AS age_nasa_gyr
@@ -604,7 +663,7 @@ def fetch_planets(session) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=[
         "planet_id","planet_name","discovery_method","discovery_year","hostname",
         "semi_major_axis_au","period_days","eccentricity","radius_earth","mass_earth",
-        "eq_temperature_k","teff_best_k","luminosity_solar","mass_solar",
+        "eq_temperature_k","teff_best_k","luminosity_solar","radius_solar","mass_solar",
         "age_gaia_gyr","age_nasa_gyr",
     ])
 
@@ -634,6 +693,14 @@ def write_scores(session, scored: list, run_at: datetime) -> int:
             "composite_score_iqr": row.get("composite_score_iqr"),
             "is_imputed": row.get("is_imputed", False),
             "hz_score": row.get("hz_score"),
+            "incident_stellar_flux": row.get("incident_stellar_flux"),
+            "incident_stellar_flux_err": row.get("incident_stellar_flux_err"),
+            "hz_conservative": row.get("hz_conservative"),
+            "hz_optimistic": row.get("hz_optimistic"),
+            "hz_prob_conservative": row.get("hz_prob_conservative"),
+            "hz_prob_optimistic": row.get("hz_prob_optimistic"),
+            "luminosity_solar": row.get("luminosity_solar"),
+            "luminosity_source": row.get("luminosity_source"),
             "teq_score": row.get("teq_score"),
             "radius_esi_score": row.get("radius_esi_score"),
             "mass_esi_score": row.get("mass_esi_score"),
@@ -656,6 +723,14 @@ def write_scores(session, scored: list, run_at: datetime) -> int:
                 "composite_score_iqr": stmt.excluded.composite_score_iqr,
                 "is_imputed": stmt.excluded.is_imputed,
                 "hz_score": stmt.excluded.hz_score,
+                "incident_stellar_flux": stmt.excluded.incident_stellar_flux,
+                "incident_stellar_flux_err": stmt.excluded.incident_stellar_flux_err,
+                "hz_conservative": stmt.excluded.hz_conservative,
+                "hz_optimistic": stmt.excluded.hz_optimistic,
+                "hz_prob_conservative": stmt.excluded.hz_prob_conservative,
+                "hz_prob_optimistic": stmt.excluded.hz_prob_optimistic,
+                "luminosity_solar": stmt.excluded.luminosity_solar,
+                "luminosity_source": stmt.excluded.luminosity_source,
                 "teq_score": stmt.excluded.teq_score,
                 "radius_esi_score": stmt.excluded.radius_esi_score,
                 "mass_esi_score": stmt.excluded.mass_esi_score,
@@ -668,6 +743,8 @@ def write_scores(session, scored: list, run_at: datetime) -> int:
             }
         )
         session.execute(stmt)
+
+    session.commit()
 
     session.commit()
     return len(rows_to_save)

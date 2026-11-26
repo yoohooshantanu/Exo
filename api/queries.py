@@ -39,6 +39,13 @@ SELECT
     hs.is_imputed,
     hs.hz_score,
     tc.cluster_name,
+    MAX((hs.input_snapshot->'hz_assessment'->>'incident_stellar_flux')::float) AS incident_stellar_flux,
+    MAX((hs.input_snapshot->'hz_assessment'->>'conservative_hz')::boolean) AS conservative_hz,
+    MAX((hs.input_snapshot->'hz_assessment'->>'optimistic_hz')::boolean) AS optimistic_hz,
+    MAX(hs.input_snapshot->'hz_assessment'->>'hz_classification') AS hz_classification,
+    MAX(hs.input_snapshot->'hz_assessment'->>'luminosity_source') AS luminosity_source,
+    MAX((hs.input_snapshot->'hz_assessment'->>'prob_conservative')::float) AS prob_conservative,
+    MAX((hs.input_snapshot->'hz_assessment'->>'prob_optimistic')::float) AS prob_optimistic,
     COALESCE(mvs.discovery_score, 0) AS discovery_score,
     mvs.observability_index,
     mvs.physical_triage_index,
@@ -105,11 +112,29 @@ SELECT
     mvs.characterization_index,
     hs.composite_score,
     hs.composite_score_iqr,
-    hs.is_imputed
+    hs.is_imputed,
+    (hs.input_snapshot->'hz_assessment'->>'incident_stellar_flux')::float AS incident_stellar_flux,
+    (hs.input_snapshot->'hz_assessment'->>'incident_stellar_flux_err')::float AS incident_stellar_flux_err,
+    (hs.input_snapshot->'hz_assessment'->>'conservative_hz')::boolean AS conservative_hz,
+    (hs.input_snapshot->'hz_assessment'->>'optimistic_hz')::boolean AS optimistic_hz,
+    hs.input_snapshot->'hz_assessment'->>'hz_classification' AS hz_classification,
+    (hs.input_snapshot->'hz_assessment'->>'prob_conservative')::float AS prob_conservative,
+    (hs.input_snapshot->'hz_assessment'->>'prob_optimistic')::float AS prob_optimistic,
+    (hs.input_snapshot->'hz_assessment'->>'luminosity_solar')::float AS hz_luminosity_solar,
+    hs.input_snapshot->'hz_assessment'->>'luminosity_source' AS hz_luminosity_source,
+    (hs.input_snapshot->'hz_assessment'->>'luminosity_err')::float AS hz_luminosity_err,
+    hs.input_snapshot->'hz_assessment'->'boundaries' AS hz_boundaries,
+    hs.input_snapshot->'hz_assessment'->'warnings' AS hz_warnings,
+    hs.input_snapshot->'hz_assessment'->'scientific_notes' AS hz_scientific_notes,
+    MAX(CASE WHEN sp.param_name = 'teff_best_k' THEN sp.value END) AS teff_best_k,
+    MAX(CASE WHEN sp.param_name = 'radius_solar' THEN sp.value END) AS radius_solar,
+    MAX(CASE WHEN sp.param_name = 'luminosity_solar' THEN sp.value END) AS star_luminosity_solar
 FROM planets p
 JOIN stars s ON p.star_id = s.star_id
 LEFT JOIN planet_parameters pp
     ON pp.planet_id = p.planet_id AND pp.is_default = true AND pp.valid_to IS NULL
+LEFT JOIN star_parameters sp
+    ON sp.star_id = s.star_id AND sp.is_default = true AND sp.valid_to IS NULL
 LEFT JOIN habitability_scores hs
     ON hs.planet_id = p.planet_id AND hs.model_version = :score_version
 LEFT JOIN (
@@ -185,11 +210,29 @@ SELECT
     mvs.physical_triage_index,
     mvs.characterization_index,
     hs.composite_score_iqr,
-    hs.is_imputed
+    hs.is_imputed,
+    (hs.input_snapshot->'hz_assessment'->>'incident_stellar_flux')::float AS incident_stellar_flux,
+    (hs.input_snapshot->'hz_assessment'->>'incident_stellar_flux_err')::float AS incident_stellar_flux_err,
+    (hs.input_snapshot->'hz_assessment'->>'conservative_hz')::boolean AS conservative_hz,
+    (hs.input_snapshot->'hz_assessment'->>'optimistic_hz')::boolean AS optimistic_hz,
+    hs.input_snapshot->'hz_assessment'->>'hz_classification' AS hz_classification,
+    (hs.input_snapshot->'hz_assessment'->>'prob_conservative')::float AS prob_conservative,
+    (hs.input_snapshot->'hz_assessment'->>'prob_optimistic')::float AS prob_optimistic,
+    (hs.input_snapshot->'hz_assessment'->>'luminosity_solar')::float AS hz_luminosity_solar,
+    hs.input_snapshot->'hz_assessment'->>'luminosity_source' AS hz_luminosity_source,
+    (hs.input_snapshot->'hz_assessment'->>'luminosity_err')::float AS hz_luminosity_err,
+    hs.input_snapshot->'hz_assessment'->'boundaries' AS hz_boundaries,
+    hs.input_snapshot->'hz_assessment'->'warnings' AS hz_warnings,
+    hs.input_snapshot->'hz_assessment'->'scientific_notes' AS hz_scientific_notes,
+    MAX(CASE WHEN sp.param_name = 'teff_best_k' THEN sp.value END) AS teff_best_k,
+    MAX(CASE WHEN sp.param_name = 'radius_solar' THEN sp.value END) AS radius_solar,
+    MAX(CASE WHEN sp.param_name = 'luminosity_solar' THEN sp.value END) AS star_luminosity_solar
 FROM planets p
 JOIN stars s ON p.star_id = s.star_id
 LEFT JOIN planet_parameters pp
     ON pp.planet_id = p.planet_id AND pp.is_default = true AND pp.valid_to IS NULL
+LEFT JOIN star_parameters sp
+    ON sp.star_id = s.star_id AND sp.is_default = true AND sp.valid_to IS NULL
 LEFT JOIN habitability_scores hs
     ON hs.planet_id = p.planet_id AND hs.model_version = :score_version
 LEFT JOIN (
