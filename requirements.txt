@@ -54,6 +54,7 @@ hitran-api>=1.0.0
 platon==5.4
 dynesty==3.2.0
 corner==2.3.0
+# pymultinest is an optional C-wrapper backend; not required for PLATON's pure-Python dynesty nested sampler
 pymultinest==2.12
 
 # Rate Limiting & Tooling

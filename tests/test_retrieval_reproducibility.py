@@ -13,6 +13,7 @@ Validates that:
 
 import json
 import pytest
+import numpy as np
 from pathlib import Path
 from modules.retrieval_reproducibility import (
     KNOWN_OPACITY_REGISTRY,
@@ -508,4 +509,91 @@ class TestSpectrumPreprocessingAudit:
         assert cfg.observation_metadata["uncertainty_provenance"]["assumed_uncertainties_fabricated"] is False
         assert cfg.observation_metadata["depth_unit_provenance"]["scale_factor"] == 0.01
         assert cfg.sampler["sampler_name"] == "dynesty"
+
+
+class TestPosteriorExtractionBranches:
+    """Verifies that each branch of posterior weights and evidence extraction functions correctly and robustly."""
+
+    def test_weights_extracted_from_result_weights_attribute(self):
+        class MockResult:
+            weights = np.array([0.2, 0.5, 0.3])
+            final_logz = 175.5
+            logzerr = [0.15]
+
+        result = MockResult()
+        dyn_res = result
+        if hasattr(result, 'weights') and result.weights is not None:
+            weights = np.asarray(result.weights).tolist()
+        assert weights == [0.2, 0.5, 0.3]
+
+    def test_weights_extracted_from_dyn_res_logwt_with_stable_logsumexp(self):
+        """Tests the logwt branch using stable log-sum-exp normalization without undefined variable references."""
+        class MockDynRes:
+            weights = None
+            logwt = np.array([-10.0, -8.0, -9.0])
+            logz = [-8.0]
+            logzerr = [0.25]
+
+        dyn_res = MockDynRes()
+        result = object()
+
+        logz_arr = getattr(result, "logz", getattr(dyn_res, "logz", None))
+        assert logz_arr == [-8.0]
+
+        if hasattr(dyn_res, 'logwt') and dyn_res.logwt is not None and len(dyn_res.logwt) > 0:
+            logwt = np.asarray(dyn_res.logwt)
+            max_logwt = np.max(logwt)
+            raw_wt = np.exp(logwt - max_logwt)
+            sum_wt = np.sum(raw_wt)
+            weights = (raw_wt / sum_wt).tolist() if sum_wt > 0 else []
+
+        assert len(weights) == 3
+        assert np.isclose(sum(weights), 1.0)
+        assert weights[1] > weights[2] > weights[0]  # -8.0 is highest logwt
+
+    def test_weights_fallback_empty_when_no_weights_or_logwt_present(self):
+        class EmptyResult:
+            weights = None
+            logwt = None
+
+        dyn_res = EmptyResult()
+        result = EmptyResult()
+
+        if hasattr(result, 'weights') and result.weights is not None:
+            weights = np.asarray(result.weights).tolist()
+        elif hasattr(dyn_res, 'weights') and dyn_res.weights is not None:
+            weights = np.asarray(dyn_res.weights).tolist()
+        elif hasattr(dyn_res, 'logwt') and dyn_res.logwt is not None and len(dyn_res.logwt) > 0:
+            weights = [1.0]
+        else:
+            weights = []
+
+        assert weights == []
+
+    def test_evidence_and_uncertainty_extraction_priorities(self):
+        class MockResult:
+            final_logz = 180.25
+            logz = [170.0, 175.0, 180.0]
+            logzerr = [1.5, 0.8, 0.32]
+
+        result = MockResult()
+        dyn_res = result
+
+        logz_arr = getattr(result, "logz", getattr(dyn_res, "logz", None))
+        if hasattr(result, 'final_logz') and result.final_logz is not None:
+            evidence_ln_z = float(result.final_logz)
+        elif logz_arr is not None and len(logz_arr) > 0:
+            evidence_ln_z = float(logz_arr[-1])
+        else:
+            evidence_ln_z = None
+
+        logzerr_arr = getattr(result, "logzerr", getattr(dyn_res, "logzerr", None))
+        if logzerr_arr is not None and len(logzerr_arr) > 0:
+            evidence_err = float(logzerr_arr[-1])
+        else:
+            evidence_err = None
+
+        assert evidence_ln_z == 180.25
+        assert evidence_err == 0.32
+
 

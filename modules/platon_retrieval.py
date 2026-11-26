@@ -201,6 +201,10 @@ def run_platon_retrieval(
         mark_failed(retrieval_id, "PLATON library is not installed in the execution environment.")
         return
 
+    retrieval_id = str(retrieval_id)
+    planet_id = str(planet_id)
+    spec_id = str(spec_id)
+
     session = Session()
     start_time = datetime.now(timezone.utc)
     try:
