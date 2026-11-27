@@ -74,6 +74,144 @@ const PARAM_LABELS: Record<string, string> = {
   'log_scat_factor': 'Rayleigh Scat. Factor (log10)',
 }
 
+function renderClassificationBadges(retrieval?: AtmosphericRetrieval) {
+  const meta = retrieval?.metadata_completeness ?? 'unverified'
+  const replay = retrieval?.replay_reproducibility ?? 'not_attempted'
+  const conv = retrieval?.convergence_status ?? 'not_evaluated'
+  const sci = retrieval?.scientific_validation ?? 'not_validated'
+
+  const metaBadge = () => {
+    switch (meta) {
+      case 'complete':
+        return (
+          <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 gap-1 text-[11px] py-0.5 px-2">
+            <CheckCircle2 className="w-3 h-3" /> Metadata: Complete
+          </Badge>
+        )
+      case 'partial':
+        return (
+          <Badge variant="outline" className="text-amber-500 border-amber-500/30 gap-1 text-[11px] py-0.5 px-2">
+            <AlertCircle className="w-3 h-3" /> Metadata: Partial
+          </Badge>
+        )
+      case 'incomplete':
+        return (
+          <Badge variant="destructive" className="gap-1 text-[11px] py-0.5 px-2">
+            <AlertTriangle className="w-3 h-3" /> Metadata: Incomplete
+          </Badge>
+        )
+      default:
+        return (
+          <Badge variant="outline" className="text-muted-foreground gap-1 text-[11px] py-0.5 px-2">
+            <Info className="w-3 h-3" /> Metadata: Unverified
+          </Badge>
+        )
+    }
+  }
+
+  const replayBadge = () => {
+    switch (replay) {
+      case 'bitwise_replay_verified':
+        return (
+          <Badge className="bg-purple-500/15 text-purple-400 border-purple-500/30 gap-1 text-[11px] py-0.5 px-2">
+            <CheckCircle2 className="w-3 h-3" /> Replay: Bitwise Verified
+          </Badge>
+        )
+      case 'numerical_replay_verified':
+        return (
+          <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/30 gap-1 text-[11px] py-0.5 px-2">
+            <CheckCircle2 className="w-3 h-3" /> Replay: Numerically Verified
+          </Badge>
+        )
+      case 'replay_with_differences':
+        return (
+          <Badge variant="destructive" className="gap-1 text-[11px] py-0.5 px-2">
+            <AlertTriangle className="w-3 h-3" /> Replay: Divergent
+          </Badge>
+        )
+      case 'blocked':
+        return (
+          <Badge variant="destructive" className="gap-1 text-[11px] py-0.5 px-2">
+            <AlertCircle className="w-3 h-3" /> Replay: Blocked
+          </Badge>
+        )
+      case 'failed':
+        return (
+          <Badge variant="destructive" className="gap-1 text-[11px] py-0.5 px-2">
+            <AlertTriangle className="w-3 h-3" /> Replay: Failed
+          </Badge>
+        )
+      default:
+        return (
+          <Badge variant="secondary" className="text-muted-foreground gap-1 text-[11px] py-0.5 px-2">
+            <Info className="w-3 h-3" /> Replay: Not Attempted
+          </Badge>
+        )
+    }
+  }
+
+  const convBadge = () => {
+    switch (conv) {
+      case 'convergence_established':
+        return (
+          <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 gap-1 text-[11px] py-0.5 px-2">
+            <CheckCircle2 className="w-3 h-3" /> Convergence: Established
+          </Badge>
+        )
+      case 'convergence_not_established':
+        return (
+          <Badge variant="destructive" className="gap-1 text-[11px] py-0.5 px-2">
+            <AlertTriangle className="w-3 h-3" /> Convergence: Not Established
+          </Badge>
+        )
+      default:
+        return (
+          <Badge variant="outline" className="text-muted-foreground gap-1 text-[11px] py-0.5 px-2">
+            <Info className="w-3 h-3" /> Convergence: Not Evaluated
+          </Badge>
+        )
+    }
+  }
+
+  const sciBadge = () => {
+    switch (sci) {
+      case 'independently_validated':
+        return (
+          <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 gap-1 text-[11px] py-0.5 px-2">
+            <CheckCircle2 className="w-3 h-3" /> Validation: Independently Validated
+          </Badge>
+        )
+      case 'partially_validated':
+        return (
+          <Badge variant="outline" className="text-amber-500 border-amber-500/30 gap-1 text-[11px] py-0.5 px-2">
+            <AlertCircle className="w-3 h-3" /> Validation: Partially Validated
+          </Badge>
+        )
+      case 'under_review':
+        return (
+          <Badge variant="outline" className="text-blue-400 border-blue-500/30 gap-1 text-[11px] py-0.5 px-2">
+            <Info className="w-3 h-3" /> Validation: Under Review
+          </Badge>
+        )
+      default:
+        return (
+          <Badge variant="outline" className="text-muted-foreground border-muted-foreground/30 gap-1 text-[11px] py-0.5 px-2">
+            <Info className="w-3 h-3" /> Validation: Not Validated
+          </Badge>
+        )
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {metaBadge()}
+      {replayBadge()}
+      {convBadge()}
+      {sciBadge()}
+    </div>
+  )
+}
+
 function renderStatusBadge(status?: string) {
   switch (status) {
     case 'reproducibility_verified':
@@ -150,16 +288,20 @@ export function PosteriorPlots({ retrievalId, retrieval }: PosteriorPlotsProps) 
               <CardDescription className="mt-1 text-xs text-muted-foreground">
                 Model inputs, opacity provenance, sampler metaparameters, and convergence diagnostics for reproducible science.
               </CardDescription>
+              <div className="text-[11px] text-muted-foreground/80 mt-1 flex items-center gap-1.5">
+                <Info className="w-3 h-3 flex-shrink-0 text-muted-foreground" />
+                <span>Replay determinism verifies computational execution, not physical truth or statistical convergence.</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              {renderStatusBadge(retrieval?.reproducibility_status)}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+              {renderClassificationBadges(retrieval)}
               <a
                 href={api.getRetrievalConfigUrl(retrievalId)}
                 download={`retrieval_config_${retrievalId}.json`}
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs font-mono">
+                <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs font-mono ml-auto">
                   <Download className="w-3.5 h-3.5" />
                   JSON Config
                 </Button>

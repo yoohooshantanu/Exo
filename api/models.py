@@ -249,6 +249,12 @@ class AtmosphericRetrievalItem(BaseModel):
     convergence_diagnostics: Optional[Union[dict, list, Any]] = None
     error_message: Optional[str] = None
     created_at: Optional[datetime] = None
+    metadata_completeness: Optional[str] = "unverified"
+    replay_reproducibility: Optional[str] = "not_attempted"
+    convergence_status: Optional[str] = "not_evaluated"
+    scientific_validation: Optional[str] = "not_validated"
+    observational_provenance: Optional[str] = "unverified_observation"
+    four_dimensional_classification: Optional[dict] = None
 
 
 class RankingItem(BaseModel):

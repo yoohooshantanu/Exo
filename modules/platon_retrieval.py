@@ -29,6 +29,8 @@ from modules.retrieval_reproducibility import (
     evaluate_retrieval_reproducibility,
     ConvergenceDiagnostics,
     compute_kish_effective_sample_size,
+    get_package_version,
+    RuntimeOpacityInterceptor,
 )
 
 from dotenv import load_dotenv
@@ -410,8 +412,28 @@ def run_platon_retrieval(
 
         chemical_species = ["H2O", "CO", "CO2", "CH4"]
 
-        # 5. Create and persist configuration record BEFORE execution
-        # Sampler engine: PLATON 5.4 uses dynesty.NestedSampler under the hood inside run_multinest.
+        # 5. Initialize Retriever & fit_info to capture runtime-derived configuration
+        retriever = CombinedRetriever()
+        fit_info = retriever.get_default_fit_info(
+            Rs=r_s_m,
+            Mp=m_p_kg,
+            Rp=r_p_m,
+            T=teq,
+            logZ=0.0,
+            CO_ratio=0.53,
+            log_cloudtop_P=5.0,
+            log_scatt_factor=0.0,
+            scatt_slope=4.0,
+            error_multiple=1.0,
+            T_star=teff,
+        )
+        for param_name, pdef in priors_dict.items():
+            fit_info.add_uniform_fit_param(param_name, pdef["bounds"][0], pdef["bounds"][1])
+
+        params_to_retrieve = list(priors_dict.keys())
+
+        # Create and persist configuration record BEFORE execution
+        # Captures runtime-inspected objects from PLATON and fit_info
         retrieval_config = create_retrieval_configuration(
             retrieval_id=retrieval_id,
             spec_id=spec_id,
@@ -429,10 +451,11 @@ def run_platon_retrieval(
             priors=priors_dict,
             sampler_name="dynesty",
             random_seed=random_seed,
-            sampler_seed_deterministic=False,
+            sampler_seed_deterministic=(random_seed is not None),
             nlive=nlive,
             wavelength_range_um=(round(wl_min_total, 2), round(wl_max_total, 2)),
             observation_metadata=observation_meta,
+            fit_info=fit_info,
         )
 
         config_filename = f"config_{retrieval_id}.json"
@@ -462,53 +485,82 @@ def run_platon_retrieval(
         })
         session.commit()
 
-        # 6. Initialize Retriever and run Nested Sampling
-        # NOTE: PRNG is initialized at the host Python/NumPy level for worker isolation.
-        # In PLATON 5.4, CombinedRetriever.run_multinest executes dynesty.NestedSampler in pure Python.
-        # Note: PYTHONHASHSEED is not set here because it is only read once by the Python
-        # runtime at interpreter initialization; modifying it inside a running process is ineffective.
+        # 6. Run Nested Sampling with explicit RNG injection & Runtime Opacity Interception
         print(f"\n[PLATON] Starting Nested Sampling Retrieval for spec_id={spec_id} (Sampler=dynesty, Seed={random_seed})")
         import numpy as np
         import random
+        import dynesty
+        dynesty_kwargs = {}
         if random_seed is not None:
             np.random.seed(random_seed)
             random.seed(random_seed)
+            sampler_rng = np.random.default_rng(random_seed)
+            dynesty_kwargs["rstate"] = sampler_rng
 
-        retriever = CombinedRetriever()
+        # Intercept sampler instantiation to record resolved internal sampling method
+        captured_samplers = []
+        orig_dynesty_new = dynesty.NestedSampler.__new__
 
-        fit_info = retriever.get_default_fit_info(
-            Rs=r_s_m,
-            Mp=m_p_kg,
-            Rp=r_p_m,
-            T=teq,
-            logZ=0.0,
-            CO_ratio=0.53,
-            log_cloudtop_P=5.0,
-            log_scatt_factor=0.0,
-            scatt_slope=4.0,
-            error_multiple=1.0,
-            T_star=teff
-        )
+        def _tracking_sampler_new(cls, *args, **kwargs):
+            s_inst = orig_dynesty_new(cls, *args, **kwargs)
+            captured_samplers.append(s_inst)
+            return s_inst
 
-        for param_name, pdef in priors_dict.items():
-            fit_info.add_uniform_fit_param(param_name, pdef["bounds"][0], pdef["bounds"][1])
+        dynesty.NestedSampler.__new__ = _tracking_sampler_new
 
-        params_to_retrieve = list(priors_dict.keys())
-
-        result = retriever.run_multinest(
-            transit_bins=np.asarray(bins, dtype=float),
-            transit_depths=np.asarray(depths, dtype=float),
-            transit_errors=np.asarray(errors, dtype=float),
-            eclipse_bins=None,
-            eclipse_depths=None,
-            eclipse_errors=None,
-            fit_info=fit_info,
-            nlive=nlive,
-        )
+        try:
+            with RuntimeOpacityInterceptor(retrieval_id=retrieval_id) as opacity_interceptor:
+                result = retriever.run_multinest(
+                    transit_bins=np.asarray(bins, dtype=float),
+                    transit_depths=np.asarray(depths, dtype=float),
+                    transit_errors=np.asarray(errors, dtype=float),
+                    eclipse_bins=None,
+                    eclipse_depths=None,
+                    eclipse_errors=None,
+                    fit_info=fit_info,
+                    nlive=nlive,
+                    **dynesty_kwargs,
+                )
+                opacity_manifest = opacity_interceptor.get_manifest()
+        finally:
+            dynesty.NestedSampler.__new__ = orig_dynesty_new
 
         actual_sampler = getattr(result, "retrieval_type", "dynesty")
+        dyn_ver = get_package_version("dynesty")
+
+        resolved_sampling = "UniformBoundSampler"
+        bound_method = "multi"
+        bound_update_interval = float(len(params_to_retrieve))
+        if captured_samplers:
+            active_s = captured_samplers[0]
+            if hasattr(active_s, "sampling") and active_s.sampling is not None:
+                resolved_sampling = active_s.sampling.__class__.__name__
+            if hasattr(active_s, "bounding") and active_s.bounding is not None:
+                bound_method = active_s.bounding
+            if hasattr(active_s, "bound_update_interval") and active_s.bound_update_interval is not None:
+                bound_update_interval = active_s.bound_update_interval
+
         retrieval_config.sampler["sampler_name"] = actual_sampler
+        retrieval_config.sampler["sampler_version"] = dyn_ver
         retrieval_config.sampler["engine_details"] = f"{actual_sampler}.NestedSampler via PLATON CombinedRetriever.run_multinest"
+        retrieval_config.sampler["rng_type"] = "numpy.random.Generator"
+        retrieval_config.sampler["rng_bit_generator"] = "PCG64"
+        retrieval_config.sampler["seed_provided"] = (random_seed is not None)
+        retrieval_config.sampler["rstate_injected"] = (random_seed is not None)
+        retrieval_config.sampler["replay_determinism_verified"] = False
+        retrieval_config.sampler["bound"] = bound_method
+        retrieval_config.sampler["sample"] = "auto"
+        retrieval_config.sampler["resolved_sampling_method"] = resolved_sampling
+        retrieval_config.sampler["update_interval_ratio"] = float(len(params_to_retrieve))
+        retrieval_config.sampler["bound_update_interval"] = bound_update_interval
+        retrieval_config.sampler["nlive"] = nlive
+        retrieval_config.sampler["parameters"] = {
+            "importance_nested_sampling": False,
+            "ins_note": "importance_nested_sampling is specific to MultiNest backend; not applicable to Dynesty",
+        }
+
+        # Update opacity provenance in config with intercepted runtime files
+        retrieval_config.opacity_provenance = opacity_manifest
 
         dyn_res = getattr(result, "results", getattr(result, "result", result))
         samples = result.samples.tolist() if hasattr(result, 'samples') else (dyn_res.samples.tolist() if hasattr(dyn_res, 'samples') else [])
@@ -631,17 +683,33 @@ def run_platon_retrieval(
                     "upper_1sigma": p84 - p50,
                 }
 
+        raw_logwt = dyn_res.logwt.tolist() if (hasattr(dyn_res, 'logwt') and dyn_res.logwt is not None) else []
+        logl_list = dyn_res.logl.tolist() if (hasattr(dyn_res, 'logl') and dyn_res.logl is not None) else []
+
         posterior_data = {
             "retrieval_id": retrieval_id,
             "params": params_to_retrieve,
             "samples": samples,
             "weights": weights,
+            "raw_log_weights": raw_logwt,
+            "log_likelihoods": logl_list,
             "best_fit": best_fit_dict,
             "summary_statistics": summary_stats,
             "evidence_ln_z": evidence_ln_z,
             "evidence_err": evidence_err,
             "reproducibility_status": repro_status,
             "random_seed": random_seed,
+            "rng_metadata": {
+                "rng_type": "numpy.random.Generator",
+                "bit_generator": "PCG64",
+                "seed": random_seed,
+                "seed_provided": (random_seed is not None),
+                "rstate_injected": (random_seed is not None),
+                "replay_determinism_verified": False,
+                "determinism_scope": retrieval_config.sampler.get("determinism_scope", {}),
+            },
+            "sampler_metadata": retrieval_config.sampler,
+            "opacity_provenance_manifest": opacity_manifest,
             "config_file": config_filename,
         }
 
@@ -661,8 +729,10 @@ def run_platon_retrieval(
                 evidence_ln_z = :ez,
                 posterior_file = :pf,
                 configuration_record = :cfg,
+                opacity_provenance = :opc,
                 convergence_diagnostics = :conv,
-                sampler_name = :sname
+                sampler_name = :sname,
+                sampler_version = :sver
             WHERE retrieval_id = :rid
         """), {
             "rps": repro_status,
@@ -671,8 +741,10 @@ def run_platon_retrieval(
             "ez": evidence_ln_z,
             "pf": stored_path,
             "cfg": json.dumps(retrieval_config.to_dict()),
+            "opc": json.dumps(retrieval_config.opacity_provenance),
             "conv": json.dumps(retrieval_config.convergence),
             "sname": actual_sampler,
+            "sver": dyn_ver,
             "rid": retrieval_id,
         })
         session.commit()

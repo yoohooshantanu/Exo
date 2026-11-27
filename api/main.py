@@ -874,7 +874,9 @@ async def get_retrieval_config(
         )
 
     # Check on disk
-    config_disk_path = RETRIEVAL_OUTPUT_DIR / f"{retrieval_id}_config.json"
+    config_disk_path = RETRIEVAL_OUTPUT_DIR / f"config_{retrieval_id}.json"
+    if not config_disk_path.is_file():
+        config_disk_path = RETRIEVAL_OUTPUT_DIR / f"{retrieval_id}_config.json"
     if config_disk_path.is_file():
         try:
             with open(config_disk_path, "r", encoding="utf-8") as f:
@@ -894,6 +896,7 @@ async def get_retrieval_config(
         "model_name": d.get("model_name", "PLATON_v1"),
         "model_version": d.get("model_version", "unknown"),
         "reproducibility_status": d.get("reproducibility_status", "reproducibility_metadata_incomplete"),
+        "four_dimensional_classification": d.get("four_dimensional_classification"),
         "sampler": {
             "sampler_name": d.get("sampler_name", "PyMultiNest"),
             "sampler_version": d.get("sampler_version", "unknown"),

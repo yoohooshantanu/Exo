@@ -386,4 +386,31 @@ export interface AtmosphericRetrieval {
   convergence_diagnostics?: ConvergenceDiagnostics
   created_at?: string
   completed_at?: string
+  metadata_completeness?: 'complete' | 'partial' | 'incomplete' | 'unverified'
+  replay_reproducibility?:
+    | 'not_attempted'
+    | 'blocked'
+    | 'failed'
+    | 'replay_with_differences'
+    | 'numerical_replay_verified'
+    | 'bitwise_replay_verified'
+  convergence_status?:
+    | 'not_evaluated'
+    | 'convergence_not_established'
+    | 'convergence_established'
+  scientific_validation?:
+    | 'not_validated'
+    | 'under_review'
+    | 'partially_validated'
+    | 'independently_validated'
+  observational_provenance?: 'published_observation' | 'synthetic_benchmark' | 'unverified_observation'
+  four_dimensional_classification?: {
+    metadata_completeness: string
+    replay_reproducibility: string
+    convergence_status: string
+    scientific_validation: string
+    observational_provenance?: string
+    notes: string[]
+    summary?: string
+  }
 }
